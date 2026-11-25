@@ -1,0 +1,2 @@
+# Only for approved PostgreSQL staging and development runtime read-only probe.
+psycopg[binary]>=3.2,<4
