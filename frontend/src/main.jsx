@@ -318,7 +318,7 @@ function ClinicalNotes({eid,cache,api,patientId,post}){
   }catch(e){setStatus('Save failed');setError(e.message)}finally{inFlight.current=false}
  }
  useEffect(()=>{if(!editorOpen||!dirty||!body.trim()||!activeVisit)return;const timeout=setTimeout(()=>{saveNote('auto')},2000);return()=>clearTimeout(timeout)},[body,doctorId,dirty,editorOpen,activeVisit?.id,retryTick]);
- const shortcutTail=body.match(/(?:^|\\s)([A-Za-z0-9_]{2,30})$/)?.[1]?.toLowerCase()||'';
+ const shortcutTail=body.match(/(?:^|\s)([A-Za-z0-9_]{2,30})$/)?.[1]?.toLowerCase()||'';
  const matchingPhrases=shortcutTail?clinicalPhrases.filter(x=>x.shortcut.startsWith(shortcutTail)).slice(0,5):[];
  const choosePhrase=phrase=>{const updated=body.slice(0,body.length-shortcutTail.length)+phrase.phrase+' ';latestInput.current={body:updated,doctorId};setBody(updated);setDirty(true);setStatus('Unsaved changes')};
  const close=()=>{if(dirty&&!window.confirm('This note has unsaved changes. Close anyway?'))return;setEditorOpen(false)};
