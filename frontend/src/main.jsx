@@ -11,6 +11,20 @@ const patientMenu=[['Patient Overview',Users],['Appointments',CalendarDays],['Vi
 
 const rupees=p=>(p/100).toLocaleString('en-IN',{style:'currency',currency:'INR'});
 const nowlocal=()=>{let d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16)};
+async function establishRecoverySecret(username,password){
+ try{
+  if(!window.crypto?.subtle)return;
+  const saltName='rd-recovery-salt-v1';
+  let rawSalt=localStorage.getItem(saltName);
+  if(!rawSalt){const bytes=crypto.getRandomValues(new Uint8Array(16));rawSalt=Array.from(bytes).map(x=>x.toString(16).padStart(2,'0')).join('');localStorage.setItem(saltName,rawSalt)}
+  const salt=Uint8Array.from(rawSalt.match(/../g).map(v=>parseInt(v,16)));
+  const pass=await crypto.subtle.importKey('raw',new TextEncoder().encode(username+'\\0'+password),'PBKDF2',false,['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:250000,hash:'SHA-256'},pass,256);
+  const secret=Array.from(new Uint8Array(bits)).map(x=>x.toString(16).padStart(2,'0')).join('');
+  sessionStorage.setItem('rd-recovery-secret-v1',secret);
+ }catch(_){/* Server autosave remains available when local encrypted recovery is unavailable. */}
+}
+
 function App(){
  const [token,setToken]=useState(sessionStorage.getItem('dental_token')||'');const[username,setUsername]=useState('');const [isSuper,setSuper]=useState(false);
  const [feature,setFeature]=useState({chair_ot_enabled:false});
@@ -27,8 +41,8 @@ function App(){
  const post=async(path,body,method)=>{setBusy(true);setError('');setNotice('');try{let result=await api(path,body,method);setNotice(result.message||'Saved successfully');await refresh();await load();return result}catch(ex){setError(ex.message);return null}finally{setBusy(false)}};
  // Browser Back restores previous page/patient context (without re-creating records).
  useEffect(()=>{const handler=()=>{const previous=navigationRef.current.pop();if(previous&&previous.eid===eid){setPage(previous.page);setPatientId(previous.patientId);setCanGoBack(navigationRef.current.length>0)}};window.addEventListener('popstate',handler);return()=>window.removeEventListener('popstate',handler)},[eid]);
- const logout=async()=>{try{await api('/logout',{},'POST')}catch(_){/* Still clear local session if API is unavailable. */}finally{try{Object.keys(localStorage).filter(k=>k.startsWith('rd-clinical-draft-v1:')).forEach(k=>localStorage.removeItem(k))}catch(_){/* Browser storage may be blocked. */}sessionStorage.removeItem('dental_token');setToken('');setCache({});setEid(null)}};
- if(!token)return <Login onLogin={async(user,password,otp)=>{try{setError('');const resp=await fetch(BASE+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,password,otp:otp||null})});const data=await resp.json();if(!resp.ok)throw Error(data.detail||'Login failed');sessionStorage.setItem('dental_token',data.token);setToken(data.token)}catch(e){setError(e.message)}}} error={error}/>;
+ const logout=async()=>{try{await api('/logout',{},'POST')}catch(_){/* Still clear local session if API is unavailable. */}finally{try{Object.keys(localStorage).filter(k=>k.startsWith('rd-clinical-draft-v1:')).forEach(k=>localStorage.removeItem(k))}catch(_){/* Browser storage may be blocked. */}sessionStorage.removeItem('rd-recovery-secret-v1');sessionStorage.removeItem('dental_token');setToken('');setCache({});setEid(null)}};
+ if(!token)return <Login onLogin={async(user,password,otp)=>{try{setError('');const resp=await fetch(BASE+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,password,otp:otp||null})});const data=await resp.json();if(!resp.ok)throw Error(data.detail||'Login failed');await establishRecoverySecret(user,password);sessionStorage.setItem('dental_token',data.token);setToken(data.token)}catch(e){setError(e.message)}}} error={error}/>;
  const entity=entities.find(x=>x.id===eid);
  const common={eid,post,busy,cache:cache.__eid===eid?cache:{},entity,isSuper,api,feature,patientId,token};
  const remember=()=>{navigationRef.current.push({page,patientId,eid});if(navigationRef.current.length>50)navigationRef.current.shift();setCanGoBack(true);window.history.pushState({rdNavigation:true},'','#'+encodeURIComponent(page).replace(/%20/g,'-'))};
@@ -297,7 +311,7 @@ function Documents({eid,cache,token,patientId}){
 function ClinicalNotes({eid,cache,api,patientId,post,token}){
  const patientIdFixed=Number(patientId||cache.patients?.[0]?.id||0);
  const localDraftKey=(recordId)=>`rd-clinical-draft-v1:${eid}:${patientIdFixed}:${recordId||'new'}`;
- const cryptKey=async()=>{if(!token||!window.crypto?.subtle)return null;const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));return crypto.subtle.importKey('raw',hash,{name:'AES-GCM'},false,['encrypt','decrypt'])};
+ const cryptKey=async()=>{if(!token||!window.crypto?.subtle)return null;const savedSecret=sessionStorage.getItem('rd-recovery-secret-v1');const raw=savedSecret?Uint8Array.from(savedSecret.match(/../g).map(x=>parseInt(x,16))):await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));return crypto.subtle.importKey('raw',raw,{name:'AES-GCM'},false,['encrypt','decrypt'])};
  const protectDraft=async value=>{const key=await cryptKey();if(!key)return null;const iv=crypto.getRandomValues(new Uint8Array(12));const encoded=new TextEncoder().encode(JSON.stringify(value));const encrypted=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,encoded));return JSON.stringify({iv:Array.from(iv),data:Array.from(encrypted)})};
  const decodeDraft=async raw=>{const key=await cryptKey();if(!key)return null;const payload=JSON.parse(raw);const bytes=await crypto.subtle.decrypt({name:'AES-GCM',iv:new Uint8Array(payload.iv)},key,new Uint8Array(payload.data));return JSON.parse(new TextDecoder().decode(bytes))};
 
