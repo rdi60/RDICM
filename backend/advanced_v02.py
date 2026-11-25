@@ -775,6 +775,22 @@ def register(app,helpers):
             log(c,u,eid,'group_created','group',id)
             return {'id':id}
 
+    @app.get('/api/v2/superadmin/users/{user_id}/assignments')
+    def get_assignments(user_id:int,u=Depends(current)):
+        if not u['is_superadmin']:fail('Super Admin required',403)
+        with db() as c:
+            user=one(c,'SELECT id,is_superadmin FROM users WHERE id=? AND active=1',(user_id,))
+            if not user or user['is_superadmin']:fail('User is not eligible',404)
+            members=rows(c,'SELECT entity_id,role FROM memberships WHERE user_id=?',(user_id,))
+            entity_roles={}
+            entity_groups={}
+            for member in members:
+                eid=member['entity_id']
+                roles=rows(c,'SELECT role FROM membership_roles_v2 WHERE user_id=? AND entity_id=?',(user_id,eid))
+                entity_roles[eid]=[r['role'] for r in roles] or [member['role']]
+                entity_groups[eid]=[r['group_id'] for r in rows(c,'SELECT group_id FROM membership_groups_v2 WHERE user_id=? AND entity_id=?',(user_id,eid))]
+            return {'user_id':user_id,'entity_roles':entity_roles,'entity_groups':entity_groups}
+
     @app.put('/api/v2/superadmin/users/{user_id}/assignments')
     def update_assignments(user_id:int,data:AssignIn,u=Depends(current)):
         if not u['is_superadmin']:fail('Super Admin required',403)
