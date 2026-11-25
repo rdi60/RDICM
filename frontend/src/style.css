@@ -147,3 +147,36 @@ tr.patient-open-row:hover,tr.clickable-patient-row:hover{background:#fff0e7}
 .ab-compact-item{border:1px solid #efdcd2;border-radius:12px;background:#fffdfb;overflow:hidden}.ab-compact-head{width:100%;padding:13px 15px;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;border:0;background:transparent;color:#382e2d;cursor:pointer}.ab-compact-head:hover,.ab-compact-head:focus-visible{background:#fff0e5}.ab-compact-head span{display:grid;gap:5px;min-width:0}.ab-compact-head small{font-size:12px;color:#79645f}.ab-compact-detail{padding:14px;background:#fff8f4;display:grid;gap:12px}.ab-compact-detail .ab-line-editor{min-width:0}@media(max-width:640px){.ab-fields,.ab-fields-three{grid-template-columns:1fr}.ab-drawer{padding:15px}.ab-compact-head{align-items:flex-start}}
 
 @media print{.ab-backdrop{position:static;background:white}.ab-drawer{width:100%;box-shadow:none}.ab-drawer-head button,.ab-report button{display:none}.app-shell aside.side,.topbar,.bottom-nav,.pagehead{display:none!important}}
+
+
+/* Compact, accessible administration patterns */
+.rd-tabs{display:flex;flex-wrap:wrap;gap:6px;padding:5px;background:#fff0e7;border:1px solid #efd9cc;border-radius:13px}
+.rd-tabs button{flex:1 1 auto;padding:10px 14px;background:transparent;border:0;border-radius:9px;color:#685752;font:inherit;font-weight:650;cursor:pointer}
+.rd-tabs button.active,.rd-tabs button[aria-selected="true"]{background:#fff;box-shadow:0 2px 8px #75452a16;color:#bd4314}
+.rd-section-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+.rd-section-top h3{margin:0}
+.rd-rows{display:grid;gap:7px}
+.rd-admin-row{display:flex;align-items:center;gap:8px;min-height:60px;border:1px solid #efded3;border-radius:11px;background:#fffdfb;color:#392f2e}
+.rd-admin-row:hover{background:#fff7f1}
+.rd-row-main{flex:1;min-width:0;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 14px;text-align:left;border:0;background:transparent;color:inherit;cursor:pointer}
+.rd-row-main>span:first-child,.rd-staff-entry>span{display:grid;gap:4px;min-width:0}
+.rd-row-main small,.rd-staff-entry small,.rd-muted{font-size:12px;color:#826f66}
+.rd-row-actions{position:relative;flex:none;margin-right:8px}
+.rd-row-actions>summary,.rd-ellipsis{display:grid;place-items:center;width:35px;height:35px;border:0;border-radius:9px;background:transparent;font-size:21px;color:#6e5750;cursor:pointer;list-style:none}
+.rd-row-actions>summary::-webkit-details-marker{display:none}
+.rd-row-actions[open]>div{position:absolute;right:0;top:100%;z-index:20;min-width:170px;display:grid;gap:3px;background:white;border:1px solid #ebd8cc;border-radius:11px;box-shadow:0 9px 24px #4e2f251b;padding:6px}
+.rd-row-actions[open]>div button{background:none;border:0;text-align:left;cursor:pointer;padding:9px 10px;border-radius:7px;color:#43312e}
+.rd-row-actions[open]>div button:hover{background:#fff0e7}
+.rd-staff-entry{width:100%;justify-content:space-between;text-align:left;padding:12px 14px;cursor:pointer}
+.rd-entity-assignment{margin:10px 0;padding:14px;border-radius:12px;background:#fff8f4;border:1px solid #efd9cc}
+.rd-entity-assignment h4{margin:0 0 12px}
+.rd-form-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+.rd-form-actions button,.rd-small-button{width:auto!important;min-width:110px}
+.rd-pagination{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:15px;flex-wrap:wrap}
+.rd-pagination button{width:auto!important;min-height:34px;padding:6px 12px;font-size:12px}
+.rd-pagination span{font-size:12px;color:#796762}
+.rd-visit-date{display:flex;align-items:center;gap:8px;background:#ffe3d0;color:#904019;padding:11px 13px;border-radius:9px;font-size:13px;font-weight:700}
+.ab-multi-options{position:absolute;left:0;right:0;z-index:30;box-shadow:0 10px 24px #3b2f2f20}
+.ab-multi-options label{justify-content:flex-start;text-align:left;gap:10px;white-space:normal}
+.ab-multi-options input[type=checkbox]{width:16px!important;height:16px;flex:0 0 16px;margin:0}
+@media(max-width:640px){.rd-tabs button{font-size:12px;padding:9px 7px}.rd-row-main{padding:10px}.rd-section-top{flex-wrap:wrap}.rd-muted{display:none}}
