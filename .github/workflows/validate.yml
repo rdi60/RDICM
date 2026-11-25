@@ -31,3 +31,4 @@ jobs:
         run: |
           python test_v02_approved.py
           python test_v03_ui_finance.py
+          python test_v04_admin_templates.py
