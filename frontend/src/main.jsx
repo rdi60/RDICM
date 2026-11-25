@@ -4,7 +4,7 @@ import{LayoutDashboard,CalendarDays,Users,Stethoscope,ClipboardList,ReceiptText,
 import {PricingAdmin,PlanBuilder,EstimateBuilder,InvoiceBuilder,AdvanceCenter,StaffMultiAccess,PatientFinanceCards,SuperAdvanceTransfers,TreatmentMIS,ClinicalTemplatesAdmin,BulkTemplateAdmin} from './AdvancedUI.jsx';
 import './style.css';
 const BASE=import.meta.env.VITE_API_URL||'http://localhost:8000';
-const APP_VERSION='v0.3';
+const APP_VERSION='v0.4-dev';
 // Clinic navigation is intentionally short. Clinical records live INSIDE a selected patient's workspace.
 const items=[['Dashboard',LayoutDashboard],['Appointments',CalendarDays],['Doctor Slots',CalendarClock],['Patients',Users],['Staff Accounts',Users],['Staff Access',ShieldCheck],['Advance Transfers',ArrowLeftRight],['Procedure & Pricing',ClipboardList],['Clinical Text Templates',FileText],['Bulk Import',FileUp],['MIS Reports',ClipboardList],['Treatment Plan',ClipboardList],['Estimates',FileText],['Billing',ReceiptText],['Credit Notes',ReceiptText],['Refund Register',ReceiptText],['Finance Summary',Wallet],['Payments',Wallet],['Chairs & OT',Armchair],['Entities',Building2],['Doctor Identity Links',ShieldCheck],['Account Security',ShieldCheck],['Activity Log',Activity],['PostgreSQL Pilot',Database]];
 const patientMenu=[['Patient Overview',Users],['Appointments',CalendarDays],['Visits & Diagnosis',Stethoscope],['Clinical Notes',FileText],['Dental Chart',HeartPulse],['Treatment Sessions',ClipboardList],['Treatment Plan',ClipboardList],['Estimates',FileText],['Consents',ShieldCheck],['Documents',FileUp],['Billing',ReceiptText],['Payments',Wallet]];
