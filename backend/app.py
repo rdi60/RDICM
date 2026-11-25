@@ -1331,6 +1331,8 @@ init()
 import advanced_v02
 advanced_v02.install(db,utc)
 advanced_v02.register(app,globals())
+import bulk_templates_v04
+bulk_templates_v04.register(app,globals())
 
 
 # Version 0.5 clinical document module. Development file backend: private on-disk directory.
