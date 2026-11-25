@@ -196,6 +196,22 @@ export function ClinicalTemplatesAdmin({eid,api,post}){
  {open&&<ActionDrawer title={editing?'Edit Clinical Phrase':'Add Clinical Phrase'} onClose={()=>setOpen(false)}><form className="ab-form" onSubmit={save}><label>Shortcut<input required minLength={2} maxLength={30} value={form.shortcut} onChange={e=>setForm(p=>({...p,shortcut:e.target.value}))} placeholder="adv1"/></label><label>Suggested text<textarea required rows={4} maxLength={500} value={form.phrase} onChange={e=>setForm(p=>({...p,phrase:e.target.value}))} placeholder="Advised review after one week"/></label><div className="rd-form-actions"><button className="primary" type="submit"><Save size={16}/> Save Phrase</button></div></form></ActionDrawer>}</div>
 }
 
+export function BulkTemplateAdmin({eid,token}){
+ const modules=[['procedures','Procedures & Pricing'],['categories','Pricing & Treatment Categories'],['staff_doctors','Staff & Doctor Directory'],['roles_groups','Roles & Groups'],['patients','Patient Master'],['opening_balances','Opening Balances & Advances'],['clinical_templates','Clinical Text Templates']];
+ const [kind,setKind]=useState('procedures'),[error,setError]=useState(''),[loading,setLoading]=useState('');
+ const download=async(format)=>{setError('');setLoading(format);try{
+ const base=import.meta.env.VITE_API_URL||'http://localhost:8000';
+ const response=await fetch(`${base}/api/entities/${eid}/v4/bulk/template/${kind}?format=${format}`,{headers:{Authorization:'Bearer '+token}});
+ if(!response.ok){const msg=await response.json().catch(()=>({}));throw Error(msg.detail||'Template download failed')}
+ const file=await response.blob(),url=URL.createObjectURL(file),a=document.createElement('a');a.href=url;a.download=`rajan_dental_${kind}_sample.${format}`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
+ }catch(e){setError(messageError(e))}finally{setLoading('')}};
+ return <div className="ab-workspace"><div className="ab-toolbar"><div><h2>Bulk Import Templates</h2><p>Select a module and download its sample Excel or CSV template.</p></div></div>
+ <ACard><div className="rd-tabs" role="tablist" aria-label="Bulk import modules">{modules.map(([id,name])=><button type="button" key={id} role="tab" aria-selected={kind===id} className={kind===id?'active':''} onClick={()=>setKind(id)}>{name}</button>)}</div>
+ {error&&<p className="ab-error" role="alert">{error}</p>}<p className="helper">Chosen module: <strong>{modules.find(m=>m[0]===kind)?.[1]}</strong>. Sample files contain fictional data only. Files are scoped to the selected entity's template.</p>
+ <div className="rd-form-actions"><Button disabled={!!loading} onClick={()=>download('xlsx')}><FileText size={15}/> {loading==='xlsx'?'Preparing…':'Download Excel (.xlsx)'}</Button><Button disabled={!!loading} onClick={()=>download('csv')}><FileText size={15}/> {loading==='csv'?'Preparing…':'Download CSV (.csv)'}</Button></div>
+ <p className="helper">Importing records is not enabled yet. Batch validation, duplicate detection and finance/staff approval rules must pass security testing before upload is available.</p></ACard></div>
+}
+
 export function SuperAdvanceTransfers({api,post,isSuper}){
  const [entities]=useRemote(api,'/v2/superadmin/entities');
  const [source,setSource]=useState(''),[destination,setDestination]=useState(''),[sourcePatient,setSourcePatient]=useState(''),[destPatient,setDestPatient]=useState(''),[receiptId,setReceiptId]=useState(''),[amount,setAmount]=useState(''),[reason,setReason]=useState(''),[error,setError]=useState('');
