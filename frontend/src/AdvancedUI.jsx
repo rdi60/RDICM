@@ -186,6 +186,16 @@ export function StaffMultiAccess({api,post,eid,isSuper}){
  </div>
 }
 
+export function ClinicalTemplatesAdmin({eid,api,post}){
+ const [rev,setRev]=useState(0),[items]=useRemote(api,`/entities/${eid}/v4/clinical-text-templates`,rev);
+ const [open,setOpen]=useState(false),[editing,setEditing]=useState(null),[form,setForm]=useState({shortcut:'',phrase:'',active:true}),[error,setError]=useState('');
+ const edit=x=>{setEditing(x||null);setForm(x?{shortcut:x.shortcut,phrase:x.phrase,active:!!x.active}:{shortcut:'',phrase:'',active:true});setError('');setOpen(true)};
+ const save=async e=>{e.preventDefault();setError('');try{const result=await post(`/entities/${eid}/v4/clinical-text-templates${editing?'/'+editing.id:''}`,form,editing?'PUT':'POST');if(!result)throw Error('Save failed');setRev(v=>v+1);setOpen(false)}catch(err){setError(messageError(err))}};
+ return <div className="ab-workspace"><div className="rd-section-top"><div><h2>Clinical Text Templates</h2><p className="helper">Reusable approved phrases for doctors. Never include patient-identifying details.</p></div><Button onClick={()=>edit(null)}><Plus size={15}/> Add Phrase</Button></div>
+ {error&&<p className="ab-error" role="alert">{error}</p>}<ACard><div className="rd-rows">{items.map(x=><button type="button" key={x.id} className="rd-admin-row rd-staff-entry" onClick={()=>edit(x)}><span><strong>{x.shortcut}</strong><small>{x.phrase}</small></span><Pencil size={16}/></button>)}{!items.length&&<p className="helper">Add your first shortcut to suggest it while doctors type.</p>}</div></ACard>
+ {open&&<ActionDrawer title={editing?'Edit Clinical Phrase':'Add Clinical Phrase'} onClose={()=>setOpen(false)}><form className="ab-form" onSubmit={save}><label>Shortcut<input required minLength={2} maxLength={30} value={form.shortcut} onChange={e=>setForm(p=>({...p,shortcut:e.target.value}))} placeholder="adv1"/></label><label>Suggested text<textarea required rows={4} maxLength={500} value={form.phrase} onChange={e=>setForm(p=>({...p,phrase:e.target.value}))} placeholder="Advised review after one week"/></label><div className="rd-form-actions"><button className="primary" type="submit"><Save size={16}/> Save Phrase</button></div></form></ActionDrawer>}</div>
+}
+
 export function SuperAdvanceTransfers({api,post,isSuper}){
  const [entities]=useRemote(api,'/v2/superadmin/entities');
  const [source,setSource]=useState(''),[destination,setDestination]=useState(''),[sourcePatient,setSourcePatient]=useState(''),[destPatient,setDestPatient]=useState(''),[receiptId,setReceiptId]=useState(''),[amount,setAmount]=useState(''),[reason,setReason]=useState(''),[error,setError]=useState('');
