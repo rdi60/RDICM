@@ -187,3 +187,9 @@ tr.patient-open-row:hover,tr.clickable-patient-row:hover{background:#fff0e7}
 .rd-phrase-suggestions button:hover,.rd-phrase-suggestions button:focus-visible{background:#ffece0}
 .rd-phrase-suggestions button strong{color:#b44a22;min-width:52px}
 .rd-phrase-suggestions button span{font-size:13px;white-space:normal}
+
+
+.rd-draft-recovery{display:grid;gap:8px;border:1px solid #dfa37e;background:#fff0e4;border-radius:12px;padding:13px;margin:10px 0;color:#5c3d2e}
+.rd-draft-recovery strong{color:#a7431c}
+.rd-draft-recovery small{font-size:12px}
+.rd-draft-recovery p{font-size:13px;white-space:pre-wrap;margin:0;max-height:100px;overflow:auto}
