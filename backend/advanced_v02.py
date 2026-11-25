@@ -9,6 +9,11 @@ from fastapi import Depends
 from pydantic import BaseModel, Field
 
 SQL = '''
+CREATE TABLE IF NOT EXISTS clinical_text_templates_v4 (
+ id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),
+ shortcut TEXT NOT NULL,phrase TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,
+ created_by INTEGER NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,
+ UNIQUE(entity_id,shortcut),UNIQUE(entity_id,id));
 CREATE TABLE IF NOT EXISTS pricing_categories (
  id INTEGER PRIMARY KEY, entity_id INTEGER NOT NULL REFERENCES entities(id),
  code TEXT NOT NULL, name TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
@@ -230,6 +235,7 @@ def register(app,helpers):
     class PriceWithProcedure(BaseModel):name:str=Field(min_length=2,max_length=200);treatment_category_id:Optional[int]=None;prices:dict[int,str]={}
     class RenameCategory(BaseModel):name:str=Field(min_length=2,max_length=100);active:bool=True
     class TreatmentCategoryIn(BaseModel):name:str=Field(min_length=2,max_length=100)
+    class ClinicalTemplateIn(BaseModel):shortcut:str=Field(min_length=2,max_length=30);phrase:str=Field(min_length=2,max_length=500);active:bool=True
     class LineIn(BaseModel):
         procedure_id:Optional[int]=None
         description:str=Field(min_length=2,max_length=300)
@@ -256,7 +262,7 @@ def register(app,helpers):
     class GroupIn(BaseModel):name:str=Field(min_length=2,max_length=100);permissions:list[str]=[]
     class AssignIn(BaseModel):entity_roles:dict[int,list[str]];entity_groups:dict[int,list[int]]={}
     # Pydantic nested route models must be resolvable by FastAPI's type-hint evaluation.
-    globals().update({c.__name__:c for c in (CategoryIn,ProcedureIn,TariffIn,PriceWithProcedure,RenameCategory,TreatmentCategoryIn,LineIn,PlanCreate,StageIn,EstimateCreate,InvoiceCreate,AdvanceIn,AdvanceAllocate,AdvanceRefund,AdvanceTransfer,WriteoffIn,GroupIn,AssignIn)})
+    globals().update({c.__name__:c for c in (CategoryIn,ProcedureIn,TariffIn,PriceWithProcedure,RenameCategory,TreatmentCategoryIn,ClinicalTemplateIn,LineIn,PlanCreate,StageIn,EstimateCreate,InvoiceCreate,AdvanceIn,AdvanceAllocate,AdvanceRefund,AdvanceTransfer,WriteoffIn,GroupIn,AssignIn)})
 
     @app.get('/api/entities/{eid}/v2/pricing-categories')
     def categories(eid:int,u=Depends(current)):
@@ -292,6 +298,35 @@ def register(app,helpers):
             c.execute('UPDATE pricing_categories SET is_default=1 WHERE entity_id=? AND id=?',(eid,category_id))
             log(c,u,eid,'pricing_default_changed','pricing_category',category_id)
             return {'id':category_id,'is_default':True}
+
+    @app.get('/api/entities/{eid}/v4/clinical-text-templates')
+    def clinical_text_templates_v4(eid:int,u=Depends(current)):
+        check(eid,u,('admin','doctor'))
+        with db() as c:
+            return rows(c,'SELECT id,shortcut,phrase,active FROM clinical_text_templates_v4 WHERE entity_id=? AND active=1 ORDER BY shortcut',(eid,))
+
+    @app.post('/api/entities/{eid}/v4/clinical-text-templates')
+    def add_clinical_template_v4(eid:int,data:ClinicalTemplateIn,u=Depends(current)):
+        check(eid,u,('admin',))
+        shortcut=data.shortcut.strip().lower()
+        if not shortcut.replace('_','').isalnum():fail('Shortcut must use letters, digits or underscores')
+        with db(True) as c:
+            if one(c,'SELECT id FROM clinical_text_templates_v4 WHERE entity_id=? AND shortcut=?',(eid,shortcut)):fail('Shortcut already exists',409)
+            id=c.execute('INSERT INTO clinical_text_templates_v4(entity_id,shortcut,phrase,active,created_by,created_at) VALUES(?,?,?,?,?,?)',(eid,shortcut,data.phrase.strip(),int(data.active),u['id'],utc())).lastrowid
+            log(c,u,eid,'clinical_shortcut_created','clinical_text_template',id)
+            return {'id':id}
+
+    @app.put('/api/entities/{eid}/v4/clinical-text-templates/{tid}')
+    def update_clinical_template_v4(eid:int,tid:int,data:ClinicalTemplateIn,u=Depends(current)):
+        check(eid,u,('admin',))
+        shortcut=data.shortcut.strip().lower()
+        if not shortcut.replace('_','').isalnum():fail('Shortcut must use letters, digits or underscores')
+        with db(True) as c:
+            require(c,'clinical_text_templates_v4',eid,tid)
+            if one(c,'SELECT id FROM clinical_text_templates_v4 WHERE entity_id=? AND shortcut=? AND id<>?',(eid,shortcut,tid)):fail('Shortcut already exists',409)
+            c.execute('UPDATE clinical_text_templates_v4 SET shortcut=?,phrase=?,active=? WHERE entity_id=? AND id=?',(shortcut,data.phrase.strip(),int(data.active),eid,tid))
+            log(c,u,eid,'clinical_shortcut_updated','clinical_text_template',tid)
+            return {'id':tid}
 
     @app.get('/api/entities/{eid}/v3/treatment-categories')
     def treatment_categories_v3(eid:int,u=Depends(current)):
