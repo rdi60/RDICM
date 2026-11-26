@@ -3,6 +3,7 @@ import{createRoot}from'react-dom/client';
 import{LayoutDashboard,CalendarDays,Users,Stethoscope,ClipboardList,ReceiptText,Wallet,CirclePlus,Building2,Menu,Search,LogOut,Activity,ArrowLeftRight,Armchair,FileText,Plus,CheckCircle2,ArrowRight,HeartPulse,ShieldCheck, X, CalendarClock, FileUp, Download, Database, ZoomIn,ZoomOut,RotateCw,Grid3X3,List,Eye,ChevronRight,Save,Cloud,Clock3,Pencil,ChevronLeft}from'lucide-react';
 import {PricingAdmin,PlanBuilder,EstimateBuilder,InvoiceBuilder,AdvanceCenter,StaffMultiAccess,PatientFinanceCards,SuperAdvanceTransfers,TreatmentMIS,ClinicalTemplatesAdmin,BulkTemplateAdmin} from './AdvancedUI.jsx';
 import './style.css';
+import './neumorphism.css';
 const BASE=import.meta.env.VITE_API_URL||'http://localhost:8000';
 const APP_VERSION='v0.4-dev';
 // Clinic navigation is intentionally short. Clinical records live INSIDE a selected patient's workspace.
