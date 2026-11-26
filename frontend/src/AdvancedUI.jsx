@@ -1,5 +1,6 @@
-import React,{useState,useEffect,useCallback,useMemo} from 'react';
-import {Plus,Search,Wallet,ReceiptText,FileText,ClipboardList,Save,ChevronRight,CheckCircle2,Pencil,Layers,ShieldCheck,ArrowLeftRight} from 'lucide-react';
+import React,{useState,useEffect,useCallback,useMemo,useRef,useId} from 'react';
+import {confirmAction,notifyAction} from './AppDialogs.jsx';
+import {Plus,Search,Wallet,ReceiptText,FileText,ClipboardList,Save,ChevronRight,ChevronDown,CheckCircle2,Pencil,Layers,ShieldCheck,ArrowLeftRight} from 'lucide-react';
 
 const money=p=>(Number(p||0)/100).toLocaleString('en-IN',{style:'currency',currency:'INR'});
 const emptyLine={procedure_id:'',description:'',tooth:'',planned_by:'',performed_by:'',unit:'procedure',quantity:1,unit_price:'0',adjust_kind:'none',adjust_mode:'rs',adjust_value:'0',billing_mode:'package'};
@@ -82,7 +83,7 @@ function PlanEditor({eid,api,post,cache,pid}){
  const action=async(path,body,method)=>{try{setError('');const r=await post(path,body,method);if(r){setRevision(v=>v+1);setOpen('')}return r}catch(e){setError(messageError(e))}};
  const create=async()=>{let r=await action(`/entities/${eid}/v2/plans`,{patient_id:pid});if(r)setPlanId(r.id)};
  const saveLine=async e=>{e.preventDefault();const body=postLine(line);const path=`/entities/${eid}/v2/plans/${planId}/lines`+(editLine?`/${editLine}`:'');const r=await action(path,body,editLine?'PUT':'POST');if(r){setEditLine(null);setLine({...emptyLine})}};
- const convert=async(to)=>{const body={patient_id:pid,plan_line_ids:selected.filter(x=>x.startsWith('l')).map(x=>Number(x.slice(1))),stage_ids:selected.filter(x=>x.startsWith('s')).map(x=>Number(x.slice(1)))};if(!body.plan_line_ids.length&&!body.stage_ids.length)return;const r=await action(`/entities/${eid}/v2/${to}`,body);if(r){setSelected([]);window.alert(`${to==='estimates'?'Estimate':'Draft invoice'} created: ${r.estimate_no||r.invoice_no}`)}};
+ const convert=async(to)=>{const body={patient_id:pid,plan_line_ids:selected.filter(x=>x.startsWith('l')).map(x=>Number(x.slice(1))),stage_ids:selected.filter(x=>x.startsWith('s')).map(x=>Number(x.slice(1)))};if(!body.plan_line_ids.length&&!body.stage_ids.length)return;const r=await action(`/entities/${eid}/v2/${to}`,body);if(r){setSelected([]);await notifyAction(`${to==='estimates'?'Estimate':'Draft invoice'} created: ${r.estimate_no||r.invoice_no}`)}};
  const toggle=id=>setSelected(x=>x.includes(id)?x.filter(y=>y!==id):[...x,id]);
  return <div className="ab-workspace"><div className="ab-toolbar"><div><h2>Stage-wise Treatment Plans</h2><p>Click an item to edit · Select multiple procedures for estimate/invoice</p></div><Button onClick={create}><Plus size={16}/> New Treatment Plan</Button></div>
  {error&&<p role="alert" className="ab-error">{error}</p>}
@@ -102,7 +103,7 @@ function EstimateEditor({eid,api,post,cache,pid}){
  const [selectedEstimate,setSelectedEstimate]=useState(null),[draftLine,setDraftLine]=useState(null),[draftForm,setDraftForm]=useState({...emptyLine});const [planId,setPlanId]=useState('');const [plan]=useRemote(api,planId?`/entities/${eid}/v2/plans/${planId}`:`/entities/${eid}/v2/plans?patient_id=${pid}`,rev);
  const create=async e=>{e.preventDefault();try{setError('');const body={patient_id:pid,category_id:val(cat),plan_line_ids:source==='plan'?selected.filter(s=>s.startsWith('l')).map(x=>Number(x.slice(1))):[],stage_ids:source==='plan'?selected.filter(s=>s.startsWith('s')).map(x=>Number(x.slice(1))):[],direct_lines:source==='direct'?queued.filter(x=>x.procedure_id).map(postLine):[]};if(source==='direct'&&!body.direct_lines.length)throw Error('Add at least one procedure');if(source==='plan'&&!body.plan_line_ids.length&&!body.stage_ids.length)throw Error('Select at least one treatment procedure or stage');const r=await post(`/entities/${eid}/v2/estimates`,body);if(!r){setError('Draft estimate could not be saved. Review the error notification and verify that each procedure has a configured price.');return}if(r){setRev(x=>x+1);setOpen(false);setQueued([{...emptyLine,category_id:cat}]);setLine({...emptyLine,category_id:cat})}}catch(e){setError(messageError(e))}};
  const approve=async id=>{const r=await post(`/entities/${eid}/v2/estimates/${id}/approve`,{});if(r)setRev(x=>x+1)};
- const invoiceFrom=async id=>{const detail=await api(`/entities/${eid}/v2/estimates/${id}`);const r=await post(`/entities/${eid}/v2/invoices`,{patient_id:pid,estimate_line_ids:detail.lines.map(x=>x.id)});if(r)window.alert('Created draft invoice '+r.invoice_no)};
+ const invoiceFrom=async id=>{const detail=await api(`/entities/${eid}/v2/estimates/${id}`);const r=await post(`/entities/${eid}/v2/invoices`,{patient_id:pid,estimate_line_ids:detail.lines.map(x=>x.id)});if(r)await notifyAction('Created draft invoice '+r.invoice_no)};
  const toggle=x=>setSelected(p=>p.includes(x)?p.filter(y=>y!==x):[...p,x]);
  const refreshDetail=async id=>setSelectedEstimate(await api(`/entities/${eid}/v2/estimates/${id}`));
  const saveDraftLine=async e=>{e.preventDefault();const result=await post(`/entities/${eid}/v3/estimates/${selectedEstimate.estimate.id}/lines/${draftLine.id}`,postLine({...draftForm,category_id:selectedEstimate.estimate.category_id}),'PUT');if(result){setDraftLine(null);await refreshDetail(selectedEstimate.estimate.id);setRev(v=>v+1)}else setError('Could not save the estimate line; please check the error message above.')};
@@ -126,7 +127,7 @@ function InvoiceEditor({eid,api,post,cache,pid}){
  const create=async e=>{e.preventDefault();const body={patient_id:pid,category_id:val(cat),direct_lines:source==='direct'?queued.filter(x=>x.procedure_id).map(postLine):[],plan_line_ids:source==='plan'?selected.filter(s=>s.startsWith('l')).map(s=>Number(s.slice(1))):[],stage_ids:source==='plan'?selected.filter(s=>s.startsWith('s')).map(s=>Number(s.slice(1))):[],estimate_line_ids:source==='estimate'?selected.map(Number):[]};if(source==='direct'&&!body.direct_lines.length){setError('Add at least one procedure');return}if(source==='plan'&&!body.plan_line_ids.length&&!body.stage_ids.length){setError('Select at least one treatment procedure or stage');return}if(source==='estimate'&&!body.estimate_line_ids.length){setError('Select at least one estimate line');return}const r=await action(`/entities/${eid}/v2/invoices`,body);if(r){setOpen(false);setSelected([]);setQueued([{...emptyLine,category_id:cat}]);setLine({...emptyLine,category_id:cat});setDetails(await api(`/entities/${eid}/v2/invoices/${r.id}`))}};
  const toggle=x=>setSelected(p=>p.includes(x)?p.filter(y=>y!==x):[...p,x]);
  const show=async id=>{setDetails(await api(`/entities/${eid}/v2/invoices/${id}`));setReport(await api(`/entities/${eid}/v3/invoices/${id}/report`))};
- const issue=async id=>{if(!window.confirm('Issue this invoice? Financial editing will be locked.'))return;const r=await action(`/entities/${eid}/v2/invoices/${id}/issue`,{});if(r)show(id)};
+ const issue=async id=>{if(!await confirmAction('Issue this invoice? Financial editing will be locked.'))return;const r=await action(`/entities/${eid}/v2/invoices/${id}/issue`,{});if(r)show(id)};
  const saveEdit=async e=>{e.preventDefault();const r=await action(`/entities/${eid}/v2/invoices/${details.invoice.id}/lines/${editing.id}`,postLine(line),'PUT');if(r){setEditing(null);show(details.invoice.id)}};
  return <div className="ab-workspace"><div className="ab-toolbar"><h2>Invoices & Billing</h2><Button onClick={()=>setOpen(true)}><Plus size={16}/> New Invoice</Button></div>{error&&<p role="alert" className="ab-error">{error}</p>}
  <ACard><div className="table-wrap"><table><thead><tr><th>Invoice</th><th>Amount</th><th>Status</th><th>Details</th></tr></thead><tbody>{invoices.map(x=><tr key={x.id} className="ab-clickable" onClick={()=>show(x.id)}><td>{x.invoice_no}</td><td>{money(x.total_paise)}</td><td>{x.status}</td><td>View / Edit <ChevronRight size={15}/></td></tr>)}</tbody></table></div>{!invoices.length&&<p className="helper">Create an invoice from a plan, approved estimate or direct procedure.</p>}</ACard>
@@ -156,7 +157,29 @@ function AdvanceEditor({eid,api,post,cache,pid}){
  <button className="primary">Confirm {open}</button></form></ActionDrawer>}</div>
 }
 
-function MultiDropdown({label,items,selected,onToggle}){const [open,setOpen]=useState(false);return <div className="ab-multi"><label>{label}</label><button type="button" className="ab-multi-trigger" onClick={()=>setOpen(!open)}>{selected.length?`${selected.length} selected: ${items.filter(x=>selected.includes(x.value)).map(x=>x.label).join(', ')}`:'Select...'}<ChevronRight size={16}/></button>{open&&<div className="ab-multi-options">{items.map(x=><label key={x.value}><input type="checkbox" checked={selected.includes(x.value)} onChange={()=>onToggle(x.value)}/>{x.label}</label>)}</div>}</div>}
+function MultiDropdown({label,items,selected,onToggle}){
+ const [open,setOpen]=useState(false);
+ const rootRef=useRef(null);
+ const optionsId=useId();
+ useEffect(()=>{
+  if(!open)return;
+  const dismissOutside=e=>{if(rootRef.current&&!rootRef.current.contains(e.target))setOpen(false)};
+  const dismissEscape=e=>{if(e.key==='Escape')setOpen(false)};
+  document.addEventListener('pointerdown',dismissOutside);
+  document.addEventListener('keydown',dismissEscape);
+  return()=>{document.removeEventListener('pointerdown',dismissOutside);document.removeEventListener('keydown',dismissEscape)};
+ },[open]);
+ return <div className="ab-multi" ref={rootRef}>
+  <label>{label}</label>
+  <button type="button" className="ab-multi-trigger" aria-expanded={open} aria-controls={optionsId} onClick={()=>setOpen(v=>!v)}>
+   <span>{selected.length?`${selected.length} selected: ${items.filter(x=>selected.includes(x.value)).map(x=>x.label).join(', ')}`:'Select...'}</span>
+   <ChevronDown className={open?'ab-multi-chevron is-open':'ab-multi-chevron'} size={16} aria-hidden="true"/>
+  </button>
+  {open&&<div className="ab-multi-options" id={optionsId}>
+   {items.map(x=><label key={x.value}><input type="checkbox" checked={selected.includes(x.value)} onChange={()=>onToggle(x.value)}/>{x.label}</label>)}
+  </div>}
+ </div>
+}
 export function StaffMultiAccess({api,post,eid,isSuper}){
  const [staffTab,setStaffTab]=useState('accounts');
  const [refresh,setRefresh]=useState(0),[users]=useRemote(api,'/v2/superadmin/users',refresh),[entities]=useRemote(api,'/v2/superadmin/entities',refresh);
@@ -219,7 +242,7 @@ export function SuperAdvanceTransfers({api,post,isSuper}){
  const [patientsTo]=useRemote(api,destination?`/entities/${destination}/patients`:'/v2/superadmin/entities');
  const [ledger]=useRemote(api,source&&sourcePatient?`/entities/${source}/v2/patients/${sourcePatient}/finances`:'/v2/superadmin/entities');
  if(!isSuper)return <ACard>Only Super Admin can authorize inter-entity transfers.</ACard>;
- const submit=async e=>{e.preventDefault();if(source===destination){setError('Source and destination entities must differ');return}if(!window.confirm('Confirm independently verified source and destination patient identities? This creates financial entries in both entities.'))return;try{setError('');const r=await post('/v2/superadmin/advance-transfer',{source_entity_id:Number(source),source_receipt_id:Number(receiptId),dest_entity_id:Number(destination),dest_patient_id:Number(destPatient),amount,reason});if(r){setAmount('');setReason('');setReceiptId('')}}catch(e){setError(messageError(e))}};
+ const submit=async e=>{e.preventDefault();if(source===destination){setError('Source and destination entities must differ');return}if(!await confirmAction('Confirm independently verified source and destination patient identities? This creates financial entries in both entities.'))return;try{setError('');const r=await post('/v2/superadmin/advance-transfer',{source_entity_id:Number(source),source_receipt_id:Number(receiptId),dest_entity_id:Number(destination),dest_patient_id:Number(destPatient),amount,reason});if(r){setAmount('');setReason('');setReceiptId('')}}catch(e){setError(messageError(e))}};
  return <div className="ab-workspace"><h2>Super Admin · Advance Transfer Between Entities</h2><ACard><p className="helper">Financial transfer only; patients, UHIDs and clinical records remain independent. Verify both patient identities before proceeding.</p>{error&&<p role="alert" className="ab-error">{error}</p>}<form className="ab-form" onSubmit={submit}>
  <div className="ab-fields"><label>Source entity<select required value={source} onChange={e=>{setSource(e.target.value);setSourcePatient('');setReceiptId('')}}><option value="">Select entity</option>{entities.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Destination entity<select required value={destination} onChange={e=>{setDestination(e.target.value);setDestPatient('')}}><option value="">Select different entity</option>{entities.filter(x=>String(x.id)!==source).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label></div>
  {source&&<PatientSelector patients={Array.isArray(patientsFrom)?patientsFrom:[]} patientId={sourcePatient} onChange={setSourcePatient} entity={entities.find(x=>String(x.id)===source)}/>}<label>Source advance receipt<select required value={receiptId} onChange={e=>setReceiptId(e.target.value)}><option value="">Select receipt</option>{(ledger.advance_ledger||[]).filter(x=>x.available_paise>0).map(r=><option key={r.id} value={r.id}>{r.receipt_no} · {money(r.available_paise)}</option>)}</select></label>

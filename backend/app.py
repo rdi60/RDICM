@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS memberships(user_id INTEGER NOT NULL REFERENCES users
 CREATE TABLE IF NOT EXISTS counters(entity_id INTEGER NOT NULL REFERENCES entities(id),category TEXT NOT NULL,value INTEGER NOT NULL,PRIMARY KEY(entity_id,category));
 CREATE TABLE IF NOT EXISTS patients(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),uhid TEXT NOT NULL,name TEXT NOT NULL,phone TEXT NOT NULL DEFAULT '',dob TEXT,notes TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,UNIQUE(entity_id,uhid),UNIQUE(entity_id,id));
 CREATE TABLE IF NOT EXISTS registrations(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),temp_id TEXT NOT NULL,name TEXT NOT NULL,phone TEXT NOT NULL DEFAULT '',dob TEXT,notes TEXT NOT NULL DEFAULT '',patient_id INTEGER,created_at TEXT NOT NULL,UNIQUE(entity_id,temp_id),UNIQUE(entity_id,id),FOREIGN KEY(entity_id,patient_id) REFERENCES patients(entity_id,id));
+CREATE INDEX IF NOT EXISTS idx_registrations_entity_phone ON registrations(entity_id,phone);
 CREATE TABLE IF NOT EXISTS doctors(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),name TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,UNIQUE(entity_id,id));
 CREATE TABLE IF NOT EXISTS resources(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),name TEXT NOT NULL,type TEXT NOT NULL CHECK(type IN ('chair','ot')),active INTEGER NOT NULL DEFAULT 1,UNIQUE(entity_id,id),UNIQUE(entity_id,name));
 CREATE TABLE IF NOT EXISTS appointments(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),patient_id INTEGER,registration_id INTEGER,doctor_id INTEGER NOT NULL,resource_id INTEGER,start_time TEXT NOT NULL,end_time TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'booked',reason TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,UNIQUE(entity_id,id),FOREIGN KEY(entity_id,patient_id) REFERENCES patients(entity_id,id),FOREIGN KEY(entity_id,registration_id) REFERENCES registrations(entity_id,id),FOREIGN KEY(entity_id,doctor_id) REFERENCES doctors(entity_id,id),FOREIGN KEY(entity_id,resource_id) REFERENCES resources(entity_id,id),CHECK(start_time<end_time),CHECK(patient_id IS NOT NULL OR registration_id IS NOT NULL));
@@ -119,6 +120,9 @@ CREATE INDEX IF NOT EXISTS idx_note_revision ON clinical_note_revisions(entity_i
 CREATE TABLE IF NOT EXISTS visit_clinical_revisions(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL,visit_id INTEGER NOT NULL,version INTEGER NOT NULL,previous_complaint TEXT NOT NULL,previous_diagnosis TEXT NOT NULL,previous_notes TEXT NOT NULL,complaint TEXT NOT NULL,diagnosis TEXT NOT NULL,notes TEXT NOT NULL,edited_by INTEGER NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,UNIQUE(entity_id,visit_id,version),FOREIGN KEY(entity_id,visit_id) REFERENCES visits(entity_id,id));
 CREATE INDEX IF NOT EXISTS idx_visit_clinical_revisions ON visit_clinical_revisions(entity_id,visit_id,version);
 ''')
+  for table in ('patients','registrations'):
+   cols={row[1] for row in c.execute(f'PRAGMA table_info({table})')}
+   if 'email' not in cols:c.execute(f"ALTER TABLE {table} ADD COLUMN email TEXT NOT NULL DEFAULT ''")
 
 def password_hash(password):
  salt=secrets.token_bytes(16); val=hashlib.pbkdf2_hmac('sha256',password.encode(),salt,310000)
@@ -191,8 +195,20 @@ class PasswordChangeIn(BaseModel):
 class EntityIn(BaseModel):name:str=Field(min_length=2,max_length=120);code:str=Field(min_length=2,max_length=12);kind:str='clinic';chairs:int=Field(default=0,ge=0,le=100);ots:int=Field(default=0,ge=0,le=30)
 class MembershipIn(BaseModel):username:str;role:str
 class MembershipRoleUpdate(BaseModel):role:str
-class RegistrationIn(BaseModel):name:str=Field(min_length=2,max_length=120);phone:str='';dob:Optional[str]=None;notes:str=''
-class CheckIn(BaseModel):registration_id:int;existing_patient_id:Optional[int]=None
+class RegistrationIn(BaseModel):
+ name:str=Field(min_length=2,max_length=120)
+ phone:str=Field(default='',max_length=25)
+ email:str=Field(default='',max_length=254)
+ dob:Optional[str]=None
+ notes:str=Field(default='',max_length=5000)
+ duplicate_acknowledged:bool=False
+class RegistrationEditIn(RegistrationIn):
+ pass
+class CheckIn(BaseModel):
+ registration_id:int
+ existing_patient_id:Optional[int]=None
+ duplicate_acknowledged:bool=False
+
 class AppointmentIn(BaseModel):patient_id:Optional[int]=None;registration_id:Optional[int]=None;doctor_id:int;resource_id:Optional[int]=None;start_time:str;end_time:str;reason:str=''
 class VisitIn(BaseModel):patient_id:int;appointment_id:Optional[int]=None;doctor_id:Optional[int]=None;complaint:str='';diagnosis:str='';notes:str=''
 class VisitClinicalEditIn(BaseModel):
@@ -723,6 +739,42 @@ def dashboard(eid:int,u=Depends(current)):
 def patients(eid:int,q:str='',u=Depends(current)):
  access(eid,u)
  with db() as c:return rows(c,'SELECT * FROM patients WHERE entity_id=? AND (name LIKE ? OR phone LIKE ? OR uhid LIKE ?) ORDER BY id DESC LIMIT 100',(eid,*['%'+q+'%']*3))
+def normalize_phone(phone):
+ phone=re.sub(r'[^0-9]','',phone or '')
+ # Normalize common Indian national/international prefixes without changing other countries.
+ if len(phone)==12 and phone.startswith('91'):return phone[2:]
+ if len(phone)==11 and phone.startswith('0'):return phone[1:]
+ return phone
+
+def normalize_contact(phone='',email=''):
+ phone=normalize_phone(phone)
+ email=(email or '').strip().lower()
+ if email and (not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email) or len(email)>254):fail('Enter a valid email address')
+ if phone and not 7<=len(phone)<=15:fail('Phone number must contain 7–15 digits')
+ return phone,email
+
+def matching_patient_records(c,eid,phone='',email='',exclude_registration_id=None,exclude_patient_id=None):
+ # Only exact normalized nonblank contact matches within the active entity.
+ phone,email=normalize_contact(phone,email)
+ matches=[]
+ for table in ('patients','registrations'):
+  if not phone and not email:continue
+  records=rows(c,f'SELECT * FROM {table} WHERE entity_id=?'+(' AND patient_id IS NULL' if table=='registrations' else ''),(eid,))
+  for row in records:
+   if (table=='registrations' and row['id']==exclude_registration_id) or (table=='patients' and row['id']==exclude_patient_id):continue
+   registered_phone=normalize_phone(row['phone'])
+   registered_email=(row['email'] or '').strip().lower()
+   by_phone=bool(phone and registered_phone==phone)
+   by_email=bool(email and registered_email==email)
+   if by_phone or by_email:
+    matches.append({'record_type':'Patient' if table=='patients' else 'Temporary Registration','id':row['id'],'name':row['name'],'uhid':row.get('uhid') or row.get('temp_id'),'phone':row['phone'],'email':row.get('email',''),'matched_on':[k for k,ok in [('phone',by_phone),('email',by_email)] if ok]})
+ return matches
+
+@app.get('/api/entities/{eid}/patient-duplicate-check')
+def patient_duplicate_check(eid:int,phone:str='',email:str='',exclude_registration_id:Optional[int]=None,exclude_patient_id:Optional[int]=None,u=Depends(current)):
+ access(eid,u)
+ with db() as c:return {'matches':matching_patient_records(c,eid,phone,email,exclude_registration_id,exclude_patient_id)}
+
 @app.get('/api/entities/{eid}/registrations')
 def registrations(eid:int,u=Depends(current)):
  access(eid,u)
@@ -730,11 +782,41 @@ def registrations(eid:int,u=Depends(current)):
 @app.post('/api/entities/{eid}/registrations')
 def register(eid:int,data:RegistrationIn,u=Depends(current)):
  access(eid,u,('admin','reception'))
+ phone,email=normalize_contact(data.phone,data.email)
  with db(True) as c:
+  matches=matching_patient_records(c,eid,phone,email)
+  if matches and not data.duplicate_acknowledged:raise HTTPException(409,detail={'code':'POSSIBLE_DUPLICATE','matches':matches})
   tmp=nextnum(c,eid,'TMP')
-  cur=c.execute('INSERT INTO registrations(entity_id,temp_id,name,phone,dob,notes,created_at) VALUES(?,?,?,?,?,?,?)',(eid,tmp,data.name,data.phone,data.dob,data.notes,utc()))
+  cur=c.execute('INSERT INTO registrations(entity_id,temp_id,name,phone,email,dob,notes,created_at) VALUES(?,?,?,?,?,?,?,?)',(eid,tmp,data.name.strip(),phone,email,data.dob,data.notes,utc()))
   audit(c,u,eid,'created','registration',cur.lastrowid)
  return {'id':cur.lastrowid,'temp_id':tmp}
+
+@app.put('/api/entities/{eid}/registrations/{registration_id}')
+def update_pending_registration(eid:int,registration_id:int,data:RegistrationEditIn,u=Depends(current)):
+ access(eid,u,('admin','reception'))
+ phone,email=normalize_contact(data.phone,data.email)
+ with db(True) as c:
+  row=one(c,'SELECT * FROM registrations WHERE entity_id=? AND id=?',(eid,registration_id))
+  if not row:fail('Registration not found',404)
+  if row['patient_id']:fail('This registration has already been checked in. Edit the patient profile instead.',409)
+  matches=matching_patient_records(c,eid,phone,email,exclude_registration_id=registration_id)
+  if matches and not data.duplicate_acknowledged:raise HTTPException(409,detail={'code':'POSSIBLE_DUPLICATE','matches':matches})
+  c.execute('UPDATE registrations SET name=?,phone=?,email=?,dob=?,notes=? WHERE id=? AND entity_id=? AND patient_id IS NULL',(data.name.strip(),phone,email,data.dob,data.notes,registration_id,eid))
+  audit(c,u,eid,'updated','registration',registration_id)
+ return {'id':registration_id,'updated':True}
+
+@app.put('/api/entities/{eid}/patients/{patient_id}/profile')
+def update_patient_profile(eid:int,patient_id:int,data:RegistrationEditIn,u=Depends(current)):
+ access(eid,u,('admin','reception'))
+ phone,email=normalize_contact(data.phone,data.email)
+ with db(True) as c:
+  patient=one(c,'SELECT * FROM patients WHERE entity_id=? AND id=?',(eid,patient_id))
+  if not patient:fail('Patient not found',404)
+  matches=matching_patient_records(c,eid,phone,email,exclude_patient_id=patient_id)
+  if matches and not data.duplicate_acknowledged:raise HTTPException(409,detail={'code':'POSSIBLE_DUPLICATE','matches':matches})
+  c.execute('UPDATE patients SET name=?,phone=?,email=?,dob=?,notes=? WHERE id=? AND entity_id=?',(data.name.strip(),phone,email,data.dob,data.notes,patient_id,eid))
+  audit(c,u,eid,'profile_updated','patient',patient_id)
+ return {'id':patient_id,'updated':True}
 @app.post('/api/entities/{eid}/check-in')
 def check_in(eid:int,data:CheckIn,u=Depends(current)):
  access(eid,u,('admin','reception'))
@@ -746,7 +828,9 @@ def check_in(eid:int,data:CheckIn,u=Depends(current)):
   if data.existing_patient_id:
    must(c,'patients',eid,data.existing_patient_id);pid=data.existing_patient_id;reused=True
   else:
-   uhid=nextnum(c,eid,'UHID');cur=c.execute('INSERT INTO patients(entity_id,uhid,name,phone,dob,notes,created_at) VALUES(?,?,?,?,?,?,?)',(eid,uhid,r['name'],r['phone'],r['dob'],r['notes'],utc()));pid=cur.lastrowid;reused=False
+   matches=matching_patient_records(c,eid,r['phone'],r['email'],exclude_registration_id=r['id'])
+   if matches and not data.duplicate_acknowledged:raise HTTPException(409,detail={'code':'POSSIBLE_DUPLICATE','matches':matches})
+   uhid=nextnum(c,eid,'UHID');cur=c.execute('INSERT INTO patients(entity_id,uhid,name,phone,email,dob,notes,created_at) VALUES(?,?,?,?,?,?,?,?)',(eid,uhid,r['name'],r['phone'],r['email'],r['dob'],r['notes'],utc()));pid=cur.lastrowid;reused=False
   c.execute('UPDATE registrations SET patient_id=? WHERE id=? AND entity_id=?',(pid,r['id'],eid))
   audit(c,u,eid,'checked_in','patient',pid)
   return {'patient':one(c,'SELECT * FROM patients WHERE id=?',(pid,)),'reused':reused}
@@ -1165,6 +1249,19 @@ def deactivate_staff(eid:int,staff_id:int,u=Depends(current)):
   c.execute('DELETE FROM sessions WHERE user_id=?',(staff_id,))
   audit(c,u,eid,'globally_deactivated','staff_account',staff_id)
  return {'id':staff_id,'active':False,'sessions_revoked':True}
+
+@app.patch('/api/entities/{eid}/staff-accounts/{staff_id}/reactivate')
+def reactivate_staff(eid:int,staff_id:int,u=Depends(current)):
+ access(eid,u,('admin',))
+ with db(True) as c:
+  target=one(c,'SELECT u.id,u.active,u.is_superadmin FROM users u JOIN memberships m ON m.user_id=u.id WHERE m.entity_id=? AND u.id=?',(eid,staff_id))
+  if not target:fail('Staff account not found in selected entity',404)
+  if target['is_superadmin']:fail('Super administrator account cannot be modified here',403)
+  if target['active']:fail('Account is already active',409)
+  c.execute('UPDATE users SET active=1 WHERE id=? AND active=0',(staff_id,))
+  c.execute('DELETE FROM sessions WHERE user_id=?',(staff_id,))
+  audit(c,u,eid,'globally_reactivated','staff_account',staff_id)
+ return {'id':staff_id,'active':True,'sessions_revoked':True}
 
 @app.get('/api/entities/{eid}/credit-notes')
 def list_credit_notes(eid:int,u=Depends(current)):
