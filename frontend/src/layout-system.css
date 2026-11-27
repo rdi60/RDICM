@@ -144,3 +144,28 @@
 .rd-drop-time{font-size:11px!important;white-space:nowrap;flex:0 0 auto;width:auto!important;padding:8px 12px!important;background:#fff9f3;border:1px solid #eac3a9;border-radius:8px;color:#8e461e;cursor:move}
 @media(max-width:600px){.rd-appointment-row,.rd-appointment-block{padding:9px}.rd-appointment-second{gap:4px}.rd-appointment-first{align-items:flex-start}.rd-appointment-status{min-width:101px;font-size:11px!important}.rd-calendar-doctor{width:100%}.rd-calendar-top .calendar-pager strong{min-width:115px}}
 
+
+
+/* Doctor slot: compact recurring month-picker and flexible multi-booking schedule */
+.rd-month-calendar{max-width:690px}
+.rd-month-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.rd-month-top>div{display:flex;gap:7px}
+.rd-month-top button{padding:4px 12px!important;min-width:34px;font-size:18px}
+.rd-month-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}
+.rd-month-grid .rd-month-weekday{font-size:11px;text-align:center;color:#7d6a61;font-weight:700;padding:5px 0}
+.rd-month-grid button{min-height:38px;border:1px solid #e8d8ce;border-radius:11px;background:#fff9f4;color:#483b38;font-weight:600;cursor:pointer}
+.rd-month-grid button.selected{background:#d9551c;color:#fff;border-color:#c74d17;box-shadow:2px 4px 7px #d9b19b}
+.rd-month-grid button:focus-visible{outline:3px solid #c95723;outline-offset:2px}
+.rd-month-footer{display:flex;justify-content:space-between;align-items:center;margin-top:11px;font-size:12px;color:#6d5853}
+.rd-slot-multi-toggle{display:flex;align-items:center!important;gap:11px;border:1px solid #ead5c8;border-radius:13px;padding:13px;background:#fff6ef;cursor:pointer}
+.rd-slot-multi-toggle input{width:18px!important;height:18px;flex:none;accent-color:#d54f1a}
+.rd-slot-multi-toggle span{display:grid;gap:3px}.rd-slot-multi-toggle small{font-weight:400;color:#6a5852}
+.rd-slot-window-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:530px){.rd-slot-window-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.rd-month-grid{gap:4px}.rd-month-grid button{min-height:32px}}
+/* Each appointment dropdown option retains the exact corresponding status-filter colours. */
+.rd-status-dropdown{position:relative;flex:none;min-width:116px}
+.rd-status-dropdown .rd-appointment-status{width:100%;display:flex;align-items:center;justify-content:space-between;gap:9px;cursor:pointer;font-size:12px}
+.rd-status-dropdown .rd-appointment-status span{font-size:14px}
+.rd-status-menu{position:absolute;z-index:80;top:calc(100% + 5px);right:0;min-width:155px;background:#fff9f3;border:1px solid #eedad0;border-radius:12px;padding:6px;box-shadow:4px 8px 20px #916e5a50;display:grid;gap:5px}
+.rd-status-menu-item{border:1px solid transparent;border-radius:9px;text-align:left;padding:8px 12px;font-size:12px;font-weight:650;cursor:pointer}
+.rd-status-menu-item:hover,.rd-status-menu-item:focus-visible{outline:2px solid currentColor;outline-offset:0}
