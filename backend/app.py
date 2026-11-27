@@ -216,6 +216,15 @@ class CheckIn(BaseModel):
  duplicate_acknowledged:bool=False
 
 class AppointmentIn(BaseModel):patient_id:Optional[int]=None;registration_id:Optional[int]=None;doctor_id:int;resource_id:Optional[int]=None;start_time:str;end_time:str;reason:str=''
+class AppointmentBatchIn(BaseModel):
+ patient_id:Optional[int]=None
+ registration_id:Optional[int]=None
+ appointments:list[AppointmentIn]=Field(min_length=1,max_length=10)
+
+class RegistrationAppointmentIn(BaseModel):
+ registration:RegistrationIn
+ appointment:AppointmentIn
+
 class AppointmentRescheduleIn(BaseModel):
  doctor_id:int
  start_time:str
@@ -802,17 +811,19 @@ def patient_duplicate_check(eid:int,phone:str='',email:str='',exclude_registrati
 def registrations(eid:int,u=Depends(current)):
  access(eid,u)
  with db() as c:return rows(c,'SELECT * FROM registrations WHERE entity_id=? ORDER BY id DESC LIMIT 100',(eid,))
+def create_registration_record(c,eid,data,u):
+ phone,email=normalize_contact(data.phone,data.email)
+ matches=matching_patient_records(c,eid,phone,email)
+ if matches and not data.duplicate_acknowledged:raise HTTPException(409,detail={'code':'POSSIBLE_DUPLICATE','matches':matches})
+ tmp=nextnum(c,eid,'TMP')
+ cur=c.execute('INSERT INTO registrations(entity_id,temp_id,name,phone,email,dob,notes,created_at) VALUES(?,?,?,?,?,?,?,?)',(eid,tmp,data.name.strip(),phone,email,data.dob,data.notes,utc()))
+ audit(c,u,eid,'created','registration',cur.lastrowid)
+ return {'id':cur.lastrowid,'temp_id':tmp}
+
 @app.post('/api/entities/{eid}/registrations')
 def register(eid:int,data:RegistrationIn,u=Depends(current)):
  access(eid,u,('admin','reception'))
- phone,email=normalize_contact(data.phone,data.email)
- with db(True) as c:
-  matches=matching_patient_records(c,eid,phone,email)
-  if matches and not data.duplicate_acknowledged:raise HTTPException(409,detail={'code':'POSSIBLE_DUPLICATE','matches':matches})
-  tmp=nextnum(c,eid,'TMP')
-  cur=c.execute('INSERT INTO registrations(entity_id,temp_id,name,phone,email,dob,notes,created_at) VALUES(?,?,?,?,?,?,?,?)',(eid,tmp,data.name.strip(),phone,email,data.dob,data.notes,utc()))
-  audit(c,u,eid,'created','registration',cur.lastrowid)
- return {'id':cur.lastrowid,'temp_id':tmp}
+ with db(True) as c:return create_registration_record(c,eid,data,u)
 
 @app.put('/api/entities/{eid}/registrations/{registration_id}')
 def update_pending_registration(eid:int,registration_id:int,data:RegistrationEditIn,u=Depends(current)):
@@ -880,48 +891,106 @@ def resources(eid:int,u=Depends(current)):
 @app.get('/api/entities/{eid}/appointments')
 def appointments(eid:int,u=Depends(current)):
  access(eid,u)
- with db() as c:return rows(c,'''SELECT a.*,d.name doctor_name,r.name resource_name,COALESCE(p.name,t.name) patient_name,COALESCE(p.uhid,t.temp_id) patient_uhid,COALESCE(p.phone,t.phone) patient_phone,COALESCE(p.dob,t.dob) patient_dob,EXISTS(SELECT 1 FROM appointment_reschedules_v4 ar WHERE ar.entity_id=a.entity_id AND ar.appointment_id=a.id) was_rescheduled FROM appointments a JOIN doctors d ON d.id=a.doctor_id AND d.entity_id=a.entity_id LEFT JOIN resources r ON r.id=a.resource_id AND r.entity_id=a.entity_id LEFT JOIN patients p ON p.id=a.patient_id AND p.entity_id=a.entity_id LEFT JOIN registrations t ON t.id=a.registration_id AND t.entity_id=a.entity_id WHERE a.entity_id=? ORDER BY a.start_time DESC LIMIT 1000''',(eid,))
-@app.post('/api/entities/{eid}/appointments')
-def appointment(eid:int,data:AppointmentIn,u=Depends(current)):
- access(eid,u,('admin','reception','doctor'))
- if bool(data.patient_id)==bool(data.registration_id):fail('Choose either a registered patient or a temporary registration')
+ with db() as c:return rows(c,'''SELECT a.*,d.name doctor_name,r.name resource_name,COALESCE(p.name,t.name) patient_name,COALESCE(p.uhid,t.temp_id) patient_uhid,COALESCE(p.phone,t.phone) patient_phone,COALESCE(p.dob,t.dob) patient_dob,EXISTS(SELECT 1 FROM appointment_reschedules_v4 ar WHERE ar.entity_id=a.entity_id AND ar.appointment_id=a.id) was_rescheduled FROM appointments a JOIN doctors d ON d.id=a.doctor_id AND d.entity_id=a.entity_id LEFT JOIN resources r ON r.id=a.resource_id AND r.entity_id=a.entity_id LEFT JOIN registrations t ON t.id=a.registration_id AND t.entity_id=a.entity_id LEFT JOIN patients p ON p.id=COALESCE(a.patient_id,t.patient_id) AND p.entity_id=a.entity_id WHERE a.entity_id=? ORDER BY a.start_time DESC LIMIT 1000''',(eid,))
+def appointment_instants(data):
  try:
   st=datetime.fromisoformat(data.start_time);en=datetime.fromisoformat(data.end_time)
   if st.tzinfo is None or en.tzinfo is None or en<=st:raise ValueError()
  except ValueError:fail('Use valid timezone-aware start and end timestamps')
- with db(True) as c:
-  for t,id in [('patients',data.patient_id),('registrations',data.registration_id),('doctors',data.doctor_id),('resources',data.resource_id)]:must(c,t,eid,id)
-  # Opt-in strict slot enforcement preserves older test/demo workflows until configured.
-  rule=one(c,'SELECT enforce_slots,allow_multiple_appointments FROM doctor_booking_rules WHERE entity_id=? AND doctor_id=?',(eid,data.doctor_id))
-  if rule and rule['enforce_slots']:
-   local_start=st.astimezone(ZoneInfo('Asia/Kolkata'))
-   local_end=en.astimezone(ZoneInfo('Asia/Kolkata'))
-   if local_start.date()!=local_end.date():fail('Appointment must remain within one India-local calendar day',409)
-   start_min=local_start.hour*60+local_start.minute
-   end_min=local_end.hour*60+local_end.minute
-   matches=rows(c,'SELECT * FROM doctor_slots WHERE entity_id=? AND doctor_id=? AND weekday=? AND active=1 AND start_minute<=? AND end_minute>=?',(eid,data.doctor_id,local_start.weekday(),start_min,end_min))
-   matches.extend(rows(c,'SELECT * FROM doctor_monthly_slots WHERE entity_id=? AND doctor_id=? AND month_day=? AND active=1 AND start_minute<=? AND end_minute>=?',(eid,data.doctor_id,local_start.day,start_min,end_min)))
-   if not any(start_min >= slot['start_minute'] and end_min <= slot['end_minute'] for slot in matches):
-    fail('Appointment must align with an active doctor opening slot in Asia/Kolkata',409)
-  # Shared clinician identity only links doctor accounts; patients and finances never link.
-  link=one(c,'SELECT clinician_key FROM clinician_links WHERE entity_id=? AND doctor_id=?',(eid,data.doctor_id))
-  if link:
-   conflict_link=one(c,"""SELECT a.id FROM appointments a JOIN clinician_links l ON l.entity_id=a.entity_id AND l.doctor_id=a.doctor_id
-        WHERE l.clinician_key=? AND a.entity_id!=? AND a.status NOT IN ('cancelled','no_show') AND a.start_time<? AND a.end_time>?""",(link['clinician_key'],eid,en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat()))
-   if conflict_link:fail('Shared doctor is booked at another entity',409)
-   time_off_link=one(c,"""SELECT t.id FROM doctor_time_off t JOIN clinician_links l ON l.entity_id=t.entity_id AND l.doctor_id=t.doctor_id
-       WHERE l.clinician_key=? AND t.entity_id!=? AND t.start_time<? AND t.end_time>?""",(link['clinician_key'],eid,en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat()))
-   if time_off_link:fail('Shared doctor is unavailable at another entity',409)
-  overlap_allowed=bool(rule and rule.get('allow_multiple_appointments',0))
-  if not overlap_allowed and one(c,'''SELECT id FROM appointments WHERE status NOT IN ('cancelled','no_show') AND start_time < ? AND end_time > ? AND doctor_id=? AND entity_id=?''',(en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat(),data.doctor_id,eid)):
-   fail('Doctor already booked in this entity',409)
-  if data.resource_id and one(c,'''SELECT id FROM appointments WHERE status NOT IN ('cancelled','no_show') AND start_time < ? AND end_time > ? AND resource_id=? AND entity_id=?''',(en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat(),data.resource_id,eid)):
-   fail('Chair/OT already booked in this entity',409)
-  # Time-off is enforced even when the appointment is manually created.
-  timeoff=one(c,'SELECT id FROM doctor_time_off WHERE entity_id=? AND doctor_id=? AND start_time<? AND end_time>?',(eid,data.doctor_id,en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat()))
-  if timeoff:fail('Doctor unavailable during requested time',409)
-  cur=c.execute('INSERT INTO appointments(entity_id,patient_id,registration_id,doctor_id,resource_id,start_time,end_time,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?)',(eid,data.patient_id,data.registration_id,data.doctor_id,data.resource_id,st.astimezone(timezone.utc).isoformat(),en.astimezone(timezone.utc).isoformat(),data.reason,utc()));audit(c,u,eid,'created','appointment',cur.lastrowid)
+ return st,en
+
+def create_appointment_record(c,eid,data,u,st,en):
+ for t,id in [('patients',data.patient_id),('registrations',data.registration_id),('doctors',data.doctor_id),('resources',data.resource_id)]:must(c,t,eid,id)
+ if data.registration_id:
+  registration=one(c,'SELECT patient_id FROM registrations WHERE id=? AND entity_id=?',(data.registration_id,eid))
+  if registration and registration['patient_id']:fail('This registration has already been checked in. Book using the permanent UHID.',409)
+ doctor=one(c,'SELECT active FROM doctors WHERE entity_id=? AND id=?',(eid,data.doctor_id))
+ if not doctor or not doctor['active']:fail('Doctor is inactive',409)
+ # Opt-in strict slot enforcement preserves older test/demo workflows until configured.
+ rule=one(c,'SELECT enforce_slots,allow_multiple_appointments FROM doctor_booking_rules WHERE entity_id=? AND doctor_id=?',(eid,data.doctor_id))
+ if rule and rule['enforce_slots']:
+  local_start=st.astimezone(ZoneInfo('Asia/Kolkata'))
+  local_end=en.astimezone(ZoneInfo('Asia/Kolkata'))
+  if local_start.date()!=local_end.date():fail('Appointment must remain within one India-local calendar day',409)
+  start_min=local_start.hour*60+local_start.minute
+  end_min=local_end.hour*60+local_end.minute
+  matches=rows(c,'SELECT * FROM doctor_slots WHERE entity_id=? AND doctor_id=? AND weekday=? AND active=1 AND start_minute<=? AND end_minute>=?',(eid,data.doctor_id,local_start.weekday(),start_min,end_min))
+  matches.extend(rows(c,'SELECT * FROM doctor_monthly_slots WHERE entity_id=? AND doctor_id=? AND month_day=? AND active=1 AND start_minute<=? AND end_minute>=?',(eid,data.doctor_id,local_start.day,start_min,end_min)))
+  if not any(start_min >= slot['start_minute'] and end_min <= slot['end_minute'] for slot in matches):
+   fail('Appointment must align with an active doctor opening slot in Asia/Kolkata',409)
+ # Shared clinician identity only links doctor accounts; patients and finances never link.
+ link=one(c,'SELECT clinician_key FROM clinician_links WHERE entity_id=? AND doctor_id=?',(eid,data.doctor_id))
+ if link:
+  conflict_link=one(c,"""SELECT a.id FROM appointments a JOIN clinician_links l ON l.entity_id=a.entity_id AND l.doctor_id=a.doctor_id
+       WHERE l.clinician_key=? AND a.entity_id!=? AND a.status NOT IN ('cancelled','no_show') AND a.start_time<? AND a.end_time>?""",(link['clinician_key'],eid,en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat()))
+  if conflict_link:fail('Shared doctor is booked at another entity',409)
+  time_off_link=one(c,"""SELECT t.id FROM doctor_time_off t JOIN clinician_links l ON l.entity_id=t.entity_id AND l.doctor_id=t.doctor_id
+      WHERE l.clinician_key=? AND t.entity_id!=? AND t.start_time<? AND t.end_time>?""",(link['clinician_key'],eid,en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat()))
+  if time_off_link:fail('Shared doctor is unavailable at another entity',409)
+ overlap_allowed=bool(rule and rule.get('allow_multiple_appointments',0))
+ if not overlap_allowed and one(c,'''SELECT id FROM appointments WHERE status NOT IN ('cancelled','no_show') AND start_time < ? AND end_time > ? AND doctor_id=? AND entity_id=?''',(en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat(),data.doctor_id,eid)):
+  fail('Doctor already booked in this entity',409)
+ if data.resource_id and one(c,'''SELECT id FROM appointments WHERE status NOT IN ('cancelled','no_show') AND start_time < ? AND end_time > ? AND resource_id=? AND entity_id=?''',(en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat(),data.resource_id,eid)):
+  fail('Chair/OT already booked in this entity',409)
+ # Time-off is enforced even when the appointment is manually created.
+ timeoff=one(c,'SELECT id FROM doctor_time_off WHERE entity_id=? AND doctor_id=? AND start_time<? AND end_time>?',(eid,data.doctor_id,en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat()))
+ if timeoff:fail('Doctor unavailable during requested time',409)
+ cur=c.execute('INSERT INTO appointments(entity_id,patient_id,registration_id,doctor_id,resource_id,start_time,end_time,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?)',(eid,data.patient_id,data.registration_id,data.doctor_id,data.resource_id,st.astimezone(timezone.utc).isoformat(),en.astimezone(timezone.utc).isoformat(),data.reason,utc()));audit(c,u,eid,'created','appointment',cur.lastrowid)
  return {'id':cur.lastrowid}
+
+@app.post('/api/entities/{eid}/appointments')
+def appointment(eid:int,data:AppointmentIn,u=Depends(current)):
+ access(eid,u,('admin','reception','doctor'))
+ if bool(data.patient_id)==bool(data.registration_id):fail('Choose either a registered patient or a temporary registration')
+ st,en=appointment_instants(data)
+ with db(True) as c:return create_appointment_record(c,eid,data,u,st,en)
+
+@app.get('/api/entities/{eid}/appointment-patient-search')
+def appointment_patient_search(eid:int,q:str='',u=Depends(current)):
+ access(eid,u,('admin','reception','doctor'))
+ term=q.strip()
+ if len(term)<2:return []
+ like='%'+term.lower().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+ with db() as c:
+  permanent=rows(c,"SELECT id,uhid AS identifier,name,phone,'patient' AS type FROM patients WHERE entity_id=? AND (LOWER(uhid) LIKE ? ESCAPE '\\' OR LOWER(name) LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\') ORDER BY id DESC LIMIT 20",(eid,like,like,like))
+  pending=rows(c,"SELECT id,temp_id AS identifier,name,phone,'registration' AS type FROM registrations WHERE entity_id=? AND patient_id IS NULL AND (LOWER(temp_id) LIKE ? ESCAPE '\\' OR LOWER(name) LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\') ORDER BY id DESC LIMIT 20",(eid,like,like,like))
+  return (permanent+pending)[:20]
+
+@app.post('/api/entities/{eid}/appointments/batch')
+def book_appointments_batch(eid:int,data:AppointmentBatchIn,u=Depends(current)):
+ access(eid,u,('admin','reception','doctor'))
+ if bool(data.patient_id)==bool(data.registration_id):fail('Select exactly one patient or temporary registration')
+ if len({item.doctor_id for item in data.appointments})!=len(data.appointments):fail('Select each doctor only once')
+ planned=[]
+ for item in data.appointments:
+  if item.patient_id or item.registration_id:fail('Patient identity must be selected once for the entire booking')
+  if not item.reason.strip():fail('Each doctor appointment requires a reason')
+  st,en=appointment_instants(item)
+  planned.append((item.model_copy(update={'patient_id':data.patient_id,'registration_id':data.registration_id}),st,en))
+ for i,(_,start,end) in enumerate(planned):
+  if any(start<other_end and end>other_start for _,other_start,other_end in planned[:i]):fail('The same patient has overlapping proposed appointments',409)
+ with db(True) as c:
+  for t,pid in (('patients',data.patient_id),('registrations',data.registration_id)):
+   if pid:must(c,t,eid,pid)
+  for _,st,en in planned:
+   if one(c,'''SELECT id FROM appointments WHERE entity_id=? AND status NOT IN ('cancelled','no_show') AND patient_id IS ? AND registration_id IS ? AND start_time<? AND end_time>?''',(eid,data.patient_id,data.registration_id,en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat())):
+    fail('Patient already has an appointment during a selected time',409)
+  booked=[create_appointment_record(c,eid,item,u,st,en) for item,st,en in planned]
+ return {'count':len(booked),'appointments':booked}
+
+@app.post('/api/entities/{eid}/registrations/book-appointment')
+def register_and_book_appointment(eid:int,data:RegistrationAppointmentIn,u=Depends(current)):
+ access(eid,u,('admin','reception'))
+ if data.appointment.patient_id or data.appointment.registration_id:
+  fail('Registration booking must use its new temporary registration; do not submit a patient identifier')
+ if not data.appointment.reason.strip():fail('Appointment reason is required')
+ st,en=appointment_instants(data.appointment)
+ with db(True) as c:
+  registration=create_registration_record(c,eid,data.registration,u)
+  linked=data.appointment.model_copy(update={'registration_id':registration['id']})
+  appointment=create_appointment_record(c,eid,linked,u,st,en)
+ return {'registration':registration,'appointment':appointment}
+
 @app.post('/api/entities/{eid}/appointments/{aid}/reschedule')
 def reschedule_appointment(eid:int,aid:int,data:AppointmentRescheduleIn,u=Depends(current)):
  access(eid,u,('admin','reception','doctor'))
