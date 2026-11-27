@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS clinical_notes(id INTEGER PRIMARY KEY,entity_id INTEG
 CREATE INDEX IF NOT EXISTS idx_clinical_notes_visit ON clinical_notes(entity_id,patient_id,visit_id);
 CREATE TABLE IF NOT EXISTS clinical_note_addenda(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),note_id INTEGER NOT NULL,author_user_id INTEGER NOT NULL REFERENCES users(id),body TEXT NOT NULL CHECK(length(trim(body))>0),reason TEXT NOT NULL CHECK(length(trim(reason))>0),created_at TEXT NOT NULL,FOREIGN KEY(entity_id,note_id) REFERENCES clinical_notes(entity_id,id));
 CREATE INDEX IF NOT EXISTS idx_addenda_note ON clinical_note_addenda(entity_id,note_id);
-CREATE TABLE IF NOT EXISTS doctor_booking_rules(entity_id INTEGER NOT NULL,doctor_id INTEGER NOT NULL,enforce_slots INTEGER NOT NULL DEFAULT 0 CHECK(enforce_slots IN (0,1)),PRIMARY KEY(entity_id,doctor_id),FOREIGN KEY(entity_id,doctor_id) REFERENCES doctors(entity_id,id));
+CREATE TABLE IF NOT EXISTS doctor_booking_rules(entity_id INTEGER NOT NULL,doctor_id INTEGER NOT NULL,enforce_slots INTEGER NOT NULL DEFAULT 0 CHECK(enforce_slots IN (0,1)),allow_multiple_appointments INTEGER NOT NULL DEFAULT 0 CHECK(allow_multiple_appointments IN (0,1)),PRIMARY KEY(entity_id,doctor_id),FOREIGN KEY(entity_id,doctor_id) REFERENCES doctors(entity_id,id));
 CREATE TABLE IF NOT EXISTS clinician_links(entity_id INTEGER NOT NULL,doctor_id INTEGER NOT NULL,clinician_key TEXT NOT NULL,PRIMARY KEY(entity_id,doctor_id),FOREIGN KEY(entity_id,doctor_id) REFERENCES doctors(entity_id,id));
 CREATE INDEX IF NOT EXISTS idx_clinician_links_key ON clinician_links(clinician_key);
 CREATE TABLE IF NOT EXISTS receipt_reversals(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL,receipt_id INTEGER NOT NULL,reason TEXT NOT NULL,performed_by INTEGER NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,UNIQUE(entity_id,receipt_id),FOREIGN KEY(entity_id,receipt_id) REFERENCES receipts(entity_id,id));
@@ -123,6 +123,9 @@ CREATE INDEX IF NOT EXISTS idx_note_revision ON clinical_note_revisions(entity_i
 CREATE TABLE IF NOT EXISTS visit_clinical_revisions(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL,visit_id INTEGER NOT NULL,version INTEGER NOT NULL,previous_complaint TEXT NOT NULL,previous_diagnosis TEXT NOT NULL,previous_notes TEXT NOT NULL,complaint TEXT NOT NULL,diagnosis TEXT NOT NULL,notes TEXT NOT NULL,edited_by INTEGER NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,UNIQUE(entity_id,visit_id,version),FOREIGN KEY(entity_id,visit_id) REFERENCES visits(entity_id,id));
 CREATE INDEX IF NOT EXISTS idx_visit_clinical_revisions ON visit_clinical_revisions(entity_id,visit_id,version);
 ''')
+  booking_columns={row[1] for row in c.execute('PRAGMA table_info(doctor_booking_rules)')}
+  if 'allow_multiple_appointments' not in booking_columns:
+   c.execute('ALTER TABLE doctor_booking_rules ADD COLUMN allow_multiple_appointments INTEGER NOT NULL DEFAULT 0 CHECK(allow_multiple_appointments IN (0,1))')
   for table in ('patients','registrations'):
    cols={row[1] for row in c.execute(f'PRAGMA table_info({table})')}
    if 'email' not in cols:c.execute(f"ALTER TABLE {table} ADD COLUMN email TEXT NOT NULL DEFAULT ''")
@@ -236,6 +239,7 @@ class SlotWindowIn(BaseModel):
  slot_minutes:int=Field(default=30,ge=5,le=240)
 class BatchSlotsIn(BaseModel):
  doctor_id:int
+ allow_multiple_appointments:bool=False
  recurrence:str
  weekdays:list[int]=Field(default_factory=list,max_length=7)
  month_days:list[int]=Field(default_factory=list,max_length=31)
@@ -249,6 +253,7 @@ class ConsentIn(BaseModel):patient_id:int;visit_id:Optional[int]=None;procedure_
 
 class BookingRulesIn(BaseModel):
  enforce_slots:bool
+ allow_multiple_appointments:Optional[bool]=None
 class ClinicianLinkIn(BaseModel):
  profiles:list[dict]=Field(min_length=2,max_length=20)
 class ReceiptReverseIn(BaseModel):
@@ -887,7 +892,7 @@ def appointment(eid:int,data:AppointmentIn,u=Depends(current)):
  with db(True) as c:
   for t,id in [('patients',data.patient_id),('registrations',data.registration_id),('doctors',data.doctor_id),('resources',data.resource_id)]:must(c,t,eid,id)
   # Opt-in strict slot enforcement preserves older test/demo workflows until configured.
-  rule=one(c,'SELECT enforce_slots FROM doctor_booking_rules WHERE entity_id=? AND doctor_id=?',(eid,data.doctor_id))
+  rule=one(c,'SELECT enforce_slots,allow_multiple_appointments FROM doctor_booking_rules WHERE entity_id=? AND doctor_id=?',(eid,data.doctor_id))
   if rule and rule['enforce_slots']:
    local_start=st.astimezone(ZoneInfo('Asia/Kolkata'))
    local_end=en.astimezone(ZoneInfo('Asia/Kolkata'))
@@ -896,7 +901,7 @@ def appointment(eid:int,data:AppointmentIn,u=Depends(current)):
    end_min=local_end.hour*60+local_end.minute
    matches=rows(c,'SELECT * FROM doctor_slots WHERE entity_id=? AND doctor_id=? AND weekday=? AND active=1 AND start_minute<=? AND end_minute>=?',(eid,data.doctor_id,local_start.weekday(),start_min,end_min))
    matches.extend(rows(c,'SELECT * FROM doctor_monthly_slots WHERE entity_id=? AND doctor_id=? AND month_day=? AND active=1 AND start_minute<=? AND end_minute>=?',(eid,data.doctor_id,local_start.day,start_min,end_min)))
-   if not any(start_min >= slot['start_minute'] and (start_min-slot['start_minute'])%slot['slot_minutes']==0 and (end_min-start_min)%slot['slot_minutes']==0 for slot in matches):
+   if not any(start_min >= slot['start_minute'] and end_min <= slot['end_minute'] for slot in matches):
     fail('Appointment must align with an active doctor opening slot in Asia/Kolkata',409)
   # Shared clinician identity only links doctor accounts; patients and finances never link.
   link=one(c,'SELECT clinician_key FROM clinician_links WHERE entity_id=? AND doctor_id=?',(eid,data.doctor_id))
@@ -907,8 +912,11 @@ def appointment(eid:int,data:AppointmentIn,u=Depends(current)):
    time_off_link=one(c,"""SELECT t.id FROM doctor_time_off t JOIN clinician_links l ON l.entity_id=t.entity_id AND l.doctor_id=t.doctor_id
        WHERE l.clinician_key=? AND t.entity_id!=? AND t.start_time<? AND t.end_time>?""",(link['clinician_key'],eid,en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat()))
    if time_off_link:fail('Shared doctor is unavailable at another entity',409)
-  conflict=one(c,'''SELECT id FROM appointments WHERE status NOT IN ('cancelled','no_show') AND start_time < ? AND end_time > ? AND (doctor_id=? OR (resource_id IS NOT NULL AND resource_id=?)) AND entity_id=?''',(en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat(),data.doctor_id,data.resource_id,eid))
-  if conflict:fail('Doctor or chair/OT already booked in this entity',409)
+  overlap_allowed=bool(rule and rule.get('allow_multiple_appointments',0))
+  if not overlap_allowed and one(c,'''SELECT id FROM appointments WHERE status NOT IN ('cancelled','no_show') AND start_time < ? AND end_time > ? AND doctor_id=? AND entity_id=?''',(en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat(),data.doctor_id,eid)):
+   fail('Doctor already booked in this entity',409)
+  if data.resource_id and one(c,'''SELECT id FROM appointments WHERE status NOT IN ('cancelled','no_show') AND start_time < ? AND end_time > ? AND resource_id=? AND entity_id=?''',(en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat(),data.resource_id,eid)):
+   fail('Chair/OT already booked in this entity',409)
   # Time-off is enforced even when the appointment is manually created.
   timeoff=one(c,'SELECT id FROM doctor_time_off WHERE entity_id=? AND doctor_id=? AND start_time<? AND end_time>?',(eid,data.doctor_id,en.astimezone(timezone.utc).isoformat(),st.astimezone(timezone.utc).isoformat()))
   if timeoff:fail('Doctor unavailable during requested time',409)
@@ -929,7 +937,8 @@ def reschedule_appointment(eid:int,aid:int,data:AppointmentRescheduleIn,u=Depend
   if previous['status'] in ('cancelled','completed'):fail('Completed or cancelled appointments cannot be rescheduled',409)
   doctor=one(c,'SELECT * FROM doctors WHERE id=? AND entity_id=?',(data.doctor_id,eid))
   if not doctor or not doctor['active']:fail('Doctor is not active in this entity',409)
-  if one(c,"SELECT id FROM appointments WHERE entity_id=? AND id<>? AND doctor_id=? AND status NOT IN ('cancelled','no_show') AND start_time<? AND end_time>?",(eid,aid,data.doctor_id,end,start)):
+  overlap_rule=one(c,'SELECT allow_multiple_appointments FROM doctor_booking_rules WHERE entity_id=? AND doctor_id=?',(eid,data.doctor_id))
+  if not (overlap_rule and overlap_rule['allow_multiple_appointments']) and one(c,"SELECT id FROM appointments WHERE entity_id=? AND id<>? AND doctor_id=? AND status NOT IN ('cancelled','no_show') AND start_time<? AND end_time>?",(eid,aid,data.doctor_id,end,start)):
    fail('Doctor already has an appointment during that time',409)
   if previous['resource_id'] and one(c,"SELECT id FROM appointments WHERE entity_id=? AND id<>? AND resource_id=? AND status NOT IN ('cancelled','no_show') AND start_time<? AND end_time>?",(eid,aid,previous['resource_id'],end,start)):
    fail('Chair or OT is not available during that time',409)
@@ -939,12 +948,12 @@ def reschedule_appointment(eid:int,aid:int,data:AppointmentRescheduleIn,u=Depend
   if link:
    if one(c,"""SELECT a.id FROM appointments a JOIN clinician_links l ON l.entity_id=a.entity_id AND l.doctor_id=a.doctor_id WHERE l.clinician_key=? AND a.entity_id<>? AND a.status NOT IN ('cancelled','no_show') AND a.start_time<? AND a.end_time>?""",(link['clinician_key'],eid,end,start)):fail('Shared doctor already booked at another entity',409)
    if one(c,"""SELECT t.id FROM doctor_time_off t JOIN clinician_links l ON l.entity_id=t.entity_id AND l.doctor_id=t.doctor_id WHERE l.clinician_key=? AND t.entity_id<>? AND t.start_time<? AND t.end_time>?""",(link['clinician_key'],eid,end,start)):fail('Shared doctor blocked at another entity',409)
-  rule=one(c,'SELECT enforce_slots FROM doctor_booking_rules WHERE entity_id=? AND doctor_id=?',(eid,data.doctor_id))
+  rule=one(c,'SELECT enforce_slots,allow_multiple_appointments FROM doctor_booking_rules WHERE entity_id=? AND doctor_id=?',(eid,data.doctor_id))
   if rule and rule['enforce_slots']:
    start_min=st.hour*60+st.minute;end_min=en.hour*60+en.minute
    slots=rows(c,'SELECT start_minute,end_minute,slot_minutes FROM doctor_slots WHERE entity_id=? AND doctor_id=? AND weekday=? AND active=1',(eid,data.doctor_id,st.weekday()))
    slots+=rows(c,'SELECT start_minute,end_minute,slot_minutes FROM doctor_monthly_slots WHERE entity_id=? AND doctor_id=? AND month_day=? AND active=1',(eid,data.doctor_id,st.day))
-   if not any(start_min>=sl['start_minute'] and end_min<=sl['end_minute'] and (start_min-sl['start_minute'])%sl['slot_minutes']==0 and (end_min-start_min)%sl['slot_minutes']==0 for sl in slots):
+   if not any(start_min>=sl['start_minute'] and end_min<=sl['end_minute'] for sl in slots):
     fail('Selected time is outside doctor opening slots',409)
   c.execute('INSERT INTO appointment_reschedules_v4(entity_id,appointment_id,old_doctor_id,new_doctor_id,old_start_time,old_end_time,new_start_time,new_end_time,reason,changed_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(eid,aid,previous['doctor_id'],data.doctor_id,previous['start_time'],previous['end_time'],start,end,data.reason.strip(),u['id'],utc()))
   c.execute("UPDATE appointments SET doctor_id=?,start_time=?,end_time=?,status='booked' WHERE entity_id=? AND id=?",(data.doctor_id,start,end,eid,aid))
@@ -1175,7 +1184,6 @@ def set_slot_batch(eid:int,data:BatchSlotsIn,u=Depends(current)):
  for w in data.windows:
   a,b=minutes(w.start_time),minutes(w.end_time)
   if b<=a:fail('Each opening window must end after its start')
-  if (b-a)%w.slot_minutes:fail('Opening window length must be a multiple of appointment duration')
   windows.append((a,b,w.slot_minutes))
  ordered=sorted(windows)
  if any(ordered[i][0]<ordered[i-1][1] for i in range(1,len(ordered))):fail('Opening windows must not overlap')
@@ -1191,7 +1199,9 @@ def set_slot_batch(eid:int,data:BatchSlotsIn,u=Depends(current)):
     cur=c.execute(f'INSERT INTO {table}(entity_id,doctor_id,{day_col},start_minute,end_minute,slot_minutes) VALUES(?,?,?,?,?,?)',(eid,data.doctor_id,day,a,b,duration))
     audit(c,u,eid,'created','doctor_slot_monthly' if data.recurrence=='monthly' else 'doctor_slot',cur.lastrowid)
     created.append(cur.lastrowid)
- return {'created':len(created),'ids':created,'recurrence':data.recurrence}
+  c.execute('INSERT INTO doctor_booking_rules(entity_id,doctor_id,enforce_slots,allow_multiple_appointments) VALUES(?,?,1,?) ON CONFLICT(entity_id,doctor_id) DO UPDATE SET enforce_slots=1,allow_multiple_appointments=excluded.allow_multiple_appointments',(eid,data.doctor_id,int(data.allow_multiple_appointments)))
+  audit(c,u,eid,'doctor_schedule_rules_updated','doctor',data.doctor_id)
+ return {'created':len(created),'ids':created,'recurrence':data.recurrence,'allow_multiple_appointments':data.allow_multiple_appointments}
 
 @app.get('/api/entities/{eid}/doctor-slots/monthly')
 def get_monthly_slots(eid:int,u=Depends(current)):
@@ -1473,7 +1483,7 @@ def create_consent(eid:int,data:ConsentIn,u=Depends(current)):
 @app.get('/api/entities/{eid}/doctor-booking-rules')
 def list_booking_rules(eid:int,u=Depends(current)):
  access(eid,u)
- with db() as c:return rows(c,'SELECT d.id doctor_id,d.name,COALESCE(r.enforce_slots,0) enforce_slots FROM doctors d LEFT JOIN doctor_booking_rules r ON r.entity_id=d.entity_id AND r.doctor_id=d.id WHERE d.entity_id=? ORDER BY d.name',(eid,))
+ with db() as c:return rows(c,'SELECT d.id doctor_id,d.name,COALESCE(r.enforce_slots,0) enforce_slots,COALESCE(r.allow_multiple_appointments,0) allow_multiple_appointments FROM doctors d LEFT JOIN doctor_booking_rules r ON r.entity_id=d.entity_id AND r.doctor_id=d.id WHERE d.entity_id=? ORDER BY d.name',(eid,))
 
 @app.put('/api/entities/{eid}/doctors/{doctor_id}/booking-rules')
 def change_booking_rules(eid:int,doctor_id:int,payload:BookingRulesIn,u=Depends(current)):
@@ -1482,7 +1492,11 @@ def change_booking_rules(eid:int,doctor_id:int,payload:BookingRulesIn,u=Depends(
   must(c,'doctors',eid,doctor_id)
   if payload.enforce_slots and not (one(c,'SELECT id FROM doctor_slots WHERE entity_id=? AND doctor_id=? AND active=1',(eid,doctor_id)) or one(c,'SELECT id FROM doctor_monthly_slots WHERE entity_id=? AND doctor_id=? AND active=1',(eid,doctor_id))):
    fail('Configure at least one recurring opening slot before enabling enforcement',409)
-  c.execute('INSERT INTO doctor_booking_rules(entity_id,doctor_id,enforce_slots) VALUES(?,?,?) ON CONFLICT(entity_id,doctor_id) DO UPDATE SET enforce_slots=excluded.enforce_slots',(eid,doctor_id,int(payload.enforce_slots)))
+  multi=payload.allow_multiple_appointments
+  if multi is None:
+   previous=one(c,'SELECT allow_multiple_appointments FROM doctor_booking_rules WHERE entity_id=? AND doctor_id=?',(eid,doctor_id))
+   multi=bool(previous and previous['allow_multiple_appointments'])
+  c.execute('INSERT INTO doctor_booking_rules(entity_id,doctor_id,enforce_slots,allow_multiple_appointments) VALUES(?,?,?,?) ON CONFLICT(entity_id,doctor_id) DO UPDATE SET enforce_slots=excluded.enforce_slots,allow_multiple_appointments=excluded.allow_multiple_appointments',(eid,doctor_id,int(payload.enforce_slots),int(multi)))
   audit(c,u,eid,'booking_rules_updated','doctor',doctor_id)
  return {'doctor_id':doctor_id,'enforce_slots':payload.enforce_slots}
 
