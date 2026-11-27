@@ -1,0 +1,146 @@
+/* Rajan Dental practical neumorphism: real layouts, not only skin changes.
+   Full-width for data-heavy work, centered/compact for short workflows. */
+:root{--rd-space:16px;--rd-page-max:1760px;--rd-form-max:980px;--rd-medium-max:1240px;--rd-surface:#fff8f1;--rd-outline:#ead6c9}
+.content{width:100%;min-width:0;max-width:none;margin:0 auto;padding:24px clamp(15px,2vw,34px)}
+.content--dashboard{max-width:var(--rd-page-max)}
+.content--compact{max-width:var(--rd-form-max);margin-inline:auto}
+.content--medium{max-width:var(--rd-medium-max);margin-inline:auto}
+.content--wide{max-width:var(--rd-page-max);margin-inline:auto}
+.content--compact .pagehead,.content--medium .pagehead{margin-bottom:17px}
+.content--compact .pagehead h1,.content--medium .pagehead h1{font-size:24px}
+.content--compact .pagehead p{margin-top:4px}
+.content--compact .header-mark{font-size:49px;margin-right:8px}
+.content--compact .ab-workspace,.content--medium .ab-workspace{gap:14px}
+.content--compact .ab-toolbar,.content--medium .ab-toolbar{gap:8px}
+.content--compact .ab-toolbar p{margin:0}
+.content--compact .ab-card{padding:18px}
+.content--compact .rd-tabs,.content--medium .rd-tabs{width:100%;gap:4px}
+.content--compact .rd-tabs button{padding:10px 8px;min-width:0}
+.content--compact .rd-entity-assignment{margin:4px 0 0;padding:13px}
+.content--compact .rd-form-actions{margin-top:6px}
+.content--compact .ab-form{gap:12px}
+/* Dashboards: four genuine data KPIs, three balanced columns, and summary row. */
+.rd-dashboard{display:grid;gap:20px;min-width:0}
+.rd-dashboard .card{margin-bottom:0}
+.rd-dashboard-kpis{margin:0;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.rd-dashboard-kpis .stat{min-height:124px;padding:20px;overflow:hidden}
+.rd-dashboard-kpis .stat strong{font-size:clamp(23px,2vw,32px);margin:11px 0 0 34px}
+.rd-dashboard-middle{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1.05fr) minmax(225px,.8fr);gap:16px;align-items:stretch}
+.rd-dashboard-middle>.card{min-width:0;padding:18px 17px;height:100%}
+.rd-dashboard .section-head{margin-bottom:15px;min-height:27px}
+.rd-dashboard .section-head h2{font-size:16px;line-height:1.3}
+.rd-dashboard .section-head .link{white-space:nowrap}
+.rd-dashboard-appointments table{font-size:12px}
+.rd-dashboard-appointments th,.rd-dashboard-appointments td{padding:11px 8px}
+.rd-dashboard-appointments tbody tr{cursor:pointer}
+.rd-dashboard-appointments tbody tr:hover{background:#fff0e8}
+.rd-dashboard-doctors .rd-doctor-list{display:grid;gap:10px}
+.rd-doctor-card{min-width:0;border:1px solid #fff;border-radius:15px;background:#fff7f1;box-shadow:var(--nm-soft);padding:12px}
+.rd-doctor-title{display:flex;align-items:center;gap:8px;min-width:0}
+.rd-doctor-title strong{font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rd-doctor-icon,.rd-quick-icon,.rd-summary-icon{width:38px;height:38px;display:grid;place-items:center;flex:none;border-radius:12px;color:#cf4d1c;background:#ffe8d8;box-shadow:var(--nm-soft)}
+.rd-doctor-title .pill{padding:5px 8px;font-size:10px;background:#ffede3;color:#a74a24}
+.rd-doctor-slots{margin:10px 0 0;display:grid;gap:6px}
+.rd-doctor-slots button{display:grid;grid-template-columns:90px minmax(0,1fr);gap:8px;text-align:left;border:0;border-radius:9px;background:#f5ece6;padding:8px;color:#57444b;font-size:11px}
+.rd-doctor-slots button:hover{background:#fce4d5}
+.rd-doctor-slots button span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rd-quick-list{display:grid;gap:10px}
+.rd-quick-list button{display:flex;align-items:center;gap:11px;padding:10px 12px;width:100%;min-height:50px;border:1px solid #fff8f2;border-radius:13px;background:linear-gradient(145deg,#fff9f3,#f9ede4);box-shadow:var(--nm-soft);color:#554049;text-align:left;font-size:12px;font-weight:650}
+.rd-quick-list button:first-child{background:linear-gradient(145deg,#ffe9dc,#f9d6c5);color:#a4431e}
+.rd-quick-list button>span:nth-child(2){flex:1}
+.rd-quick-list button:hover{transform:translateY(-1px)}
+.rd-dashboard-bottom{display:grid;grid-template-columns:minmax(0,1.75fr) repeat(2,minmax(210px,.8fr));gap:16px;align-items:stretch}
+.rd-dashboard-bottom>.card{margin:0;min-width:0}
+.rd-dashboard-recent{padding:17px}
+.rd-patient-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.rd-patient-chip{display:flex;align-items:center;gap:8px;min-width:0;padding:10px;border-radius:14px;background:#fff8f1;border:1px solid #fff;box-shadow:var(--nm-soft);color:#4b3540;text-align:left}
+.rd-patient-chip>span:nth-child(2){flex:1;min-width:0;display:grid;gap:2px}
+.rd-patient-chip strong,.rd-patient-chip small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rd-patient-chip strong{font-size:12px}.rd-patient-chip small{font-size:10px;color:#8c7475}
+.rd-patient-avatar{width:33px;height:33px;border-radius:50%;display:grid;place-items:center;background:#ffe3d9;color:#bf4c25;flex:none;font-weight:700}
+.rd-dashboard-summary{display:flex;align-items:center;gap:12px;padding:18px;text-align:left;color:#44313b;border:1px solid #fffaf5;cursor:pointer}
+.rd-dashboard-summary>span:nth-child(2){flex:1;min-width:0;display:grid;gap:8px}
+.rd-dashboard-summary strong{font-size:14px}
+.rd-dashboard-summary b{font-size:24px}
+.rd-dashboard-summary small{font-size:11px;color:#7e6d73}
+.rd-dashboard-summary:hover{transform:translateY(-1px)}
+/* Help text and empty areas must not stretch controls across a giant card. */
+.ab-workspace .rd-form-actions button,.rd-pagination button{width:auto!important}
+.ab-workspace .ab-form input,.ab-workspace .ab-form select,.ab-workspace .ab-form textarea{max-width:100%}
+.content--compact .alert{max-width:100%}
+.content--wide .table-wrap{max-width:100%}
+@media(max-width:1450px){.rd-dashboard-middle{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr)}.rd-dashboard-quick{grid-column:1/-1}.rd-quick-list{grid-template-columns:repeat(4,minmax(0,1fr))}.rd-dashboard-bottom{grid-template-columns:minmax(0,1.5fr) repeat(2,minmax(180px,.8fr))}.rd-patient-list{grid-template-columns:1fr}}
+@media(max-width:1150px){.rd-dashboard-bottom{grid-template-columns:repeat(2,minmax(0,1fr))}.rd-dashboard-recent{grid-column:1/-1}.rd-patient-list{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:950px){.rd-dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.rd-dashboard-middle{grid-template-columns:1fr}.rd-dashboard-quick{grid-column:auto}.rd-quick-list{grid-template-columns:repeat(2,minmax(0,1fr))}.rd-dashboard-bottom{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:650px){.content{padding:13px}.rd-dashboard{gap:12px}.rd-dashboard-kpis,.rd-dashboard-bottom{gap:10px}.rd-dashboard-kpis .stat{padding:13px;min-height:103px}.rd-dashboard-kpis .stat strong{font-size:21px;margin:9px 0 0}.rd-dashboard-kpis .stat-top{gap:7px}.rd-dashboard-middle>.card{padding:13px}.rd-dashboard-bottom{grid-template-columns:1fr}.rd-dashboard-recent{grid-column:auto}.rd-patient-list{grid-template-columns:1fr}.rd-quick-list{grid-template-columns:1fr 1fr;gap:8px}.rd-quick-list button{padding:9px;gap:7px}.content--compact .rd-tabs button{font-size:11px;padding:9px 4px}.content--compact .ab-card{padding:13px}}
+@media print{.rd-dashboard .card,.rd-dashboard .stat{box-shadow:none!important}}
+
+/* Shared proportional sizing for other forms without constraining data tables. */
+.content--wide .ab-card .ab-form,.content--medium .ab-card .ab-form{max-width:1100px}
+.content--wide .form-grid:not(.rd-full-width),.content--medium .form-grid:not(.rd-full-width){max-width:1100px}
+.content--compact .card:not(.rd-dashboard-summary){min-width:0}
+@media(min-width:1500px){.content--compact{padding-top:20px}.content--compact .card,.content--compact .ab-card{box-shadow:5px 6px 19px #d8c7bba0,-5px -5px 15px #fffdf9!important}}
+
+/* Compact doctor schedule controls */
+.rd-slot-form{max-width:680px;margin-inline:auto}
+.rd-slot-recurrence{display:flex;gap:6px;background:#f6eae1;border-radius:13px;padding:5px}
+.rd-slot-recurrence button{flex:1;border:0;background:transparent;padding:10px 12px;border-radius:10px;color:#65565a;font-weight:600;cursor:pointer}
+.rd-slot-recurrence button.active{background:#fff9f3;color:#b94317;box-shadow:3px 3px 9px #d9c6ba,-3px -3px 9px #fff}
+.rd-slot-day-selector{margin:0;border:1px solid #ecd8ca;border-radius:13px;padding:10px 13px}
+.rd-slot-day-selector legend{font-size:13px;font-weight:650;color:#4b383b}
+.rd-slot-days{display:flex;flex-wrap:wrap;gap:7px}
+.rd-slot-days label{display:flex;align-items:center;justify-content:center;gap:5px;cursor:pointer;padding:7px 10px;border:1px solid #ecd8ca;border-radius:9px;background:#fffaf5;min-width:63px;font-size:12px}
+.rd-slot-days label.selected{background:#ffe5d5;border-color:#e6a77f;color:#a83b18}
+.rd-slot-days input{width:14px;height:14px;margin:0;accent-color:#d54f1a}
+.rd-slot-month-days label{min-width:37px}
+.rd-slot-window-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rd-slot-window-header button{width:auto!important;padding:7px 10px!important;font-size:12px}
+.rd-slot-window{border:1px solid #edd9cb;border-radius:12px;padding:12px;background:#fff9f5;display:grid;gap:8px}
+.rd-slot-window-number{font-weight:700;color:#a3431d;font-size:13px}
+.rd-slot-window-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.rd-slot-window-fields input{width:100%}
+.rd-slot-remove{justify-self:end;font-size:12px!important}
+.rd-slot-error{color:#a02c23;background:#fff0ec;padding:9px;border-radius:9px;font-size:13px}
+@media(max-width:530px){.rd-slot-window-fields{grid-template-columns:1fr 1fr}.rd-slot-window-fields>*:last-child{grid-column:span 2}}
+
+/* Compact chronological appointment list, one vertical stream for every doctor filter. */
+.rd-appointment-workspace{width:100%;min-width:0;display:grid;gap:13px}
+.rd-calendar-top{display:flex;justify-content:space-between;align-items:end;flex-wrap:wrap;gap:12px}
+.rd-calendar-top .calendar-pager{margin:0;gap:7px;display:flex;flex-wrap:wrap;align-items:center}
+.rd-calendar-top .calendar-pager strong{font-size:13px;font-weight:750;min-width:140px;text-align:center}
+.rd-calendar-doctor{display:grid;gap:4px;min-width:185px;font-size:12px;font-weight:650}
+.rd-calendar-doctor select{min-height:36px;padding:6px 24px 6px 11px!important}
+.rd-status-filters{display:flex;flex-wrap:wrap;gap:6px}
+.rd-status-filter{cursor:pointer;border-radius:18px;padding:6px 11px;font-size:12px;font-weight:650;border:1px solid #eddfd7;background:#fff7f1;color:#68564d;display:flex;align-items:center;gap:6px}
+.rd-status-filter small{font-size:11px;padding:1px 5px;background:#ffffffc8;border-radius:9px}
+.rd-status-filter.selected{box-shadow:inset 2px 2px 5px #d3b4a180;border-color:currentColor}
+.rd-status-scheduled{background:#e2edff!important;color:#285c9c!important}
+.rd-status-confirmed{background:#eee4ff!important;color:#6943a0!important}
+.rd-status-checkin{background:#dcf4e7!important;color:#26744f!important}
+.rd-status-checkout{background:#ddf1ec!important;color:#2b7064!important}
+.rd-status-reschedule{background:#fff0c9!important;color:#8d5b0b!important}
+.rd-status-cancelled{background:#ffe3e3!important;color:#a33c42!important}
+.rd-status-blocked{background:#ffdfc3!important;color:#a34b17!important}
+.rd-calendar-caption{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px;color:#75645a}
+.rd-appointment-rows{display:grid;gap:7px;max-height:720px;overflow:auto;padding:3px}
+.rd-appointment-row,.rd-appointment-block{padding:9px 13px;border:1px solid #efdfd4;border-radius:13px;background:linear-gradient(145deg,#fffaf6,#fbf0e8);display:grid;gap:7px;min-width:0;box-shadow:2px 3px 8px #d4bfb14f}
+.rd-appointment-row[draggable=true]{cursor:grab}
+.rd-appointment-row:active{cursor:grabbing}
+.rd-appointment-first{display:flex;justify-content:space-between;align-items:center;gap:10px;min-width:0}
+.rd-appointment-person{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap;min-width:0;cursor:pointer}
+.rd-appointment-person strong{font-size:13px;font-weight:750;color:#392d31}
+.rd-appointment-person span{font-size:12px;color:#826f66}
+.rd-appointment-second{display:flex;gap:7px;align-items:center;flex-wrap:wrap;font-size:12px;color:#6e5e56;line-height:1.4}
+.rd-appointment-second a{color:#a94720;text-decoration:none;font-weight:700}
+.rd-appointment-status{width:auto!important;max-width:148px;min-width:116px;min-height:31px!important;font-size:12px!important;padding:4px 20px 4px 10px!important;border-radius:18px!important;box-shadow:none!important;border:1px solid #ffffffd9!important;font-weight:650;cursor:pointer;text-align:left}
+.rd-appointment-status:focus-visible{outline:2px solid #d95b22}
+.rd-status-tag{border-radius:15px;padding:5px 9px;font-size:11px;font-weight:750}
+.rd-appointment-block{background:linear-gradient(145deg,#fff2e5,#ffe9d8);border-color:#eca977}
+.rd-appointment-block .rd-appointment-first strong,.rd-appointment-block .rd-appointment-second{color:#97481e}
+.rd-reschedule-summary{padding:10px 12px;margin-bottom:12px;background:#fff1e5;border:1px solid #f0d6c6;border-radius:11px;display:grid;gap:5px}
+.rd-reschedule-summary small{color:#78554a}
+.rd-time-drop-zone{background:#fff3e5;border:1px dashed #d56030;padding:12px;border-radius:12px;display:grid;gap:9px}
+.rd-drop-times{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px}
+.rd-drop-time{font-size:11px!important;white-space:nowrap;flex:0 0 auto;width:auto!important;padding:8px 12px!important;background:#fff9f3;border:1px solid #eac3a9;border-radius:8px;color:#8e461e;cursor:move}
+@media(max-width:600px){.rd-appointment-row,.rd-appointment-block{padding:9px}.rd-appointment-second{gap:4px}.rd-appointment-first{align-items:flex-start}.rd-appointment-status{min-width:101px;font-size:11px!important}.rd-calendar-doctor{width:100%}.rd-calendar-top .calendar-pager strong{min-width:115px}}
+

@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS doctors(id INTEGER PRIMARY KEY,entity_id INTEGER NOT 
 CREATE TABLE IF NOT EXISTS resources(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),name TEXT NOT NULL,type TEXT NOT NULL CHECK(type IN ('chair','ot')),active INTEGER NOT NULL DEFAULT 1,UNIQUE(entity_id,id),UNIQUE(entity_id,name));
 CREATE TABLE IF NOT EXISTS appointments(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),patient_id INTEGER,registration_id INTEGER,doctor_id INTEGER NOT NULL,resource_id INTEGER,start_time TEXT NOT NULL,end_time TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'booked',reason TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,UNIQUE(entity_id,id),FOREIGN KEY(entity_id,patient_id) REFERENCES patients(entity_id,id),FOREIGN KEY(entity_id,registration_id) REFERENCES registrations(entity_id,id),FOREIGN KEY(entity_id,doctor_id) REFERENCES doctors(entity_id,id),FOREIGN KEY(entity_id,resource_id) REFERENCES resources(entity_id,id),CHECK(start_time<end_time),CHECK(patient_id IS NOT NULL OR registration_id IS NOT NULL));
 CREATE INDEX IF NOT EXISTS idx_appointments_slot ON appointments(entity_id,start_time,end_time);
+CREATE TABLE IF NOT EXISTS appointment_reschedules_v4(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL,appointment_id INTEGER NOT NULL,old_doctor_id INTEGER NOT NULL,new_doctor_id INTEGER NOT NULL,old_start_time TEXT NOT NULL,old_end_time TEXT NOT NULL,new_start_time TEXT NOT NULL,new_end_time TEXT NOT NULL,reason TEXT NOT NULL,changed_by INTEGER NOT NULL,created_at TEXT NOT NULL,FOREIGN KEY(entity_id,appointment_id) REFERENCES appointments(entity_id,id));
+CREATE INDEX IF NOT EXISTS idx_appt_reschedule_mis ON appointment_reschedules_v4(entity_id,created_at);
 CREATE TABLE IF NOT EXISTS visits(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),visit_no TEXT NOT NULL,patient_id INTEGER NOT NULL,appointment_id INTEGER,doctor_id INTEGER,complaint TEXT NOT NULL DEFAULT '',diagnosis TEXT NOT NULL DEFAULT '',notes TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,UNIQUE(entity_id,visit_no),UNIQUE(entity_id,id),FOREIGN KEY(entity_id,patient_id) REFERENCES patients(entity_id,id),FOREIGN KEY(entity_id,appointment_id) REFERENCES appointments(entity_id,id),FOREIGN KEY(entity_id,doctor_id) REFERENCES doctors(entity_id,id));
 CREATE TABLE IF NOT EXISTS treatments(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),visit_id INTEGER NOT NULL,description TEXT NOT NULL,tooth TEXT NOT NULL DEFAULT '',planned_by INTEGER,performed_by INTEGER,status TEXT NOT NULL DEFAULT 'planned',amount_paise INTEGER NOT NULL DEFAULT 0,UNIQUE(entity_id,id),FOREIGN KEY(entity_id,visit_id) REFERENCES visits(entity_id,id),FOREIGN KEY(entity_id,planned_by) REFERENCES doctors(entity_id,id),FOREIGN KEY(entity_id,performed_by) REFERENCES doctors(entity_id,id));
 CREATE TABLE IF NOT EXISTS invoices(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),invoice_no TEXT NOT NULL,patient_id INTEGER NOT NULL,total_paise INTEGER NOT NULL CHECK(total_paise>=0),description TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(entity_id,invoice_no),UNIQUE(entity_id,id),FOREIGN KEY(entity_id,patient_id) REFERENCES patients(entity_id,id));
@@ -88,6 +90,7 @@ BEGIN
  THEN RAISE(ABORT,'Receipt overallocation') END;
 END;
 CREATE TABLE IF NOT EXISTS doctor_slots(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),doctor_id INTEGER NOT NULL,weekday INTEGER NOT NULL CHECK(weekday BETWEEN 0 AND 6),start_minute INTEGER NOT NULL CHECK(start_minute BETWEEN 0 AND 1439),end_minute INTEGER NOT NULL CHECK(end_minute BETWEEN 1 AND 1440),slot_minutes INTEGER NOT NULL CHECK(slot_minutes BETWEEN 5 AND 240),active INTEGER NOT NULL DEFAULT 1,CHECK(end_minute>start_minute),FOREIGN KEY(entity_id,doctor_id) REFERENCES doctors(entity_id,id));
+CREATE TABLE IF NOT EXISTS doctor_monthly_slots(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),doctor_id INTEGER NOT NULL,month_day INTEGER NOT NULL CHECK(month_day BETWEEN 1 AND 31),start_minute INTEGER NOT NULL CHECK(start_minute BETWEEN 0 AND 1439),end_minute INTEGER NOT NULL CHECK(end_minute BETWEEN 1 AND 1440),slot_minutes INTEGER NOT NULL CHECK(slot_minutes BETWEEN 5 AND 240),active INTEGER NOT NULL DEFAULT 1,CHECK(end_minute>start_minute),FOREIGN KEY(entity_id,doctor_id) REFERENCES doctors(entity_id,id));
 CREATE TABLE IF NOT EXISTS doctor_time_off(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),doctor_id INTEGER NOT NULL,start_time TEXT NOT NULL,end_time TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',FOREIGN KEY(entity_id,doctor_id) REFERENCES doctors(entity_id,id),CHECK(start_time<end_time));
 CREATE TABLE IF NOT EXISTS estimates(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),estimate_no TEXT NOT NULL,patient_id INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','approved','invoiced')),total_paise INTEGER NOT NULL,created_at TEXT NOT NULL,UNIQUE(entity_id,estimate_no),UNIQUE(entity_id,id),FOREIGN KEY(entity_id,patient_id) REFERENCES patients(entity_id,id));
 CREATE TABLE IF NOT EXISTS estimate_items(id INTEGER PRIMARY KEY,entity_id INTEGER NOT NULL REFERENCES entities(id),estimate_id INTEGER NOT NULL,treatment_id INTEGER NOT NULL,description TEXT NOT NULL,amount_paise INTEGER NOT NULL CHECK(amount_paise>=0),FOREIGN KEY(entity_id,estimate_id) REFERENCES estimates(entity_id,id),FOREIGN KEY(entity_id,treatment_id) REFERENCES treatments(entity_id,id),UNIQUE(entity_id,estimate_id,treatment_id));
@@ -210,6 +213,11 @@ class CheckIn(BaseModel):
  duplicate_acknowledged:bool=False
 
 class AppointmentIn(BaseModel):patient_id:Optional[int]=None;registration_id:Optional[int]=None;doctor_id:int;resource_id:Optional[int]=None;start_time:str;end_time:str;reason:str=''
+class AppointmentRescheduleIn(BaseModel):
+ doctor_id:int
+ start_time:str
+ end_time:str
+ reason:str=Field(min_length=3,max_length=1000)
 class VisitIn(BaseModel):patient_id:int;appointment_id:Optional[int]=None;doctor_id:Optional[int]=None;complaint:str='';diagnosis:str='';notes:str=''
 class VisitClinicalEditIn(BaseModel):
  complaint:str=Field(max_length=10000)
@@ -222,6 +230,16 @@ class InvoiceIn(BaseModel):patient_id:int;description:str;amount:str
 class AllocIn(BaseModel):invoice_id:int;amount:str
 class ReceiptIn(BaseModel):patient_id:int;amount:str;method:str='cash';reference:str='';allocations:list[AllocIn]=[]
 class SlotIn(BaseModel):doctor_id:int;weekday:int=Field(ge=0,le=6);start_time:str;end_time:str;slot_minutes:int=Field(default=30,ge=5,le=240)
+class SlotWindowIn(BaseModel):
+ start_time:str
+ end_time:str
+ slot_minutes:int=Field(default=30,ge=5,le=240)
+class BatchSlotsIn(BaseModel):
+ doctor_id:int
+ recurrence:str
+ weekdays:list[int]=Field(default_factory=list,max_length=7)
+ month_days:list[int]=Field(default_factory=list,max_length=31)
+ windows:list[SlotWindowIn]=Field(min_length=1,max_length=12)
 class TimeOffIn(BaseModel):doctor_id:int;start_time:str;end_time:str;reason:str=''
 class EstimateIn(BaseModel):patient_id:int;treatment_ids:list[int]=Field(min_length=1)
 class AppointmentStatusIn(BaseModel):status:str
@@ -799,8 +817,10 @@ def update_pending_registration(eid:int,registration_id:int,data:RegistrationEdi
   row=one(c,'SELECT * FROM registrations WHERE entity_id=? AND id=?',(eid,registration_id))
   if not row:fail('Registration not found',404)
   if row['patient_id']:fail('This registration has already been checked in. Edit the patient profile instead.',409)
-  matches=matching_patient_records(c,eid,phone,email,exclude_registration_id=registration_id)
-  if matches and not data.duplicate_acknowledged:raise HTTPException(409,detail={'code':'POSSIBLE_DUPLICATE','matches':matches})
+  contacts_changed=normalize_phone(row['phone'])!=phone or (row['email'] or '').strip().lower()!=email
+  if contacts_changed:
+   matches=matching_patient_records(c,eid,phone,email,exclude_registration_id=registration_id)
+   if matches and not data.duplicate_acknowledged:raise HTTPException(409,detail={'code':'POSSIBLE_DUPLICATE','matches':matches})
   c.execute('UPDATE registrations SET name=?,phone=?,email=?,dob=?,notes=? WHERE id=? AND entity_id=? AND patient_id IS NULL',(data.name.strip(),phone,email,data.dob,data.notes,registration_id,eid))
   audit(c,u,eid,'updated','registration',registration_id)
  return {'id':registration_id,'updated':True}
@@ -812,8 +832,10 @@ def update_patient_profile(eid:int,patient_id:int,data:RegistrationEditIn,u=Depe
  with db(True) as c:
   patient=one(c,'SELECT * FROM patients WHERE entity_id=? AND id=?',(eid,patient_id))
   if not patient:fail('Patient not found',404)
-  matches=matching_patient_records(c,eid,phone,email,exclude_patient_id=patient_id)
-  if matches and not data.duplicate_acknowledged:raise HTTPException(409,detail={'code':'POSSIBLE_DUPLICATE','matches':matches})
+  contacts_changed=normalize_phone(patient['phone'])!=phone or (patient['email'] or '').strip().lower()!=email
+  if contacts_changed:
+   matches=matching_patient_records(c,eid,phone,email,exclude_patient_id=patient_id)
+   if matches and not data.duplicate_acknowledged:raise HTTPException(409,detail={'code':'POSSIBLE_DUPLICATE','matches':matches})
   c.execute('UPDATE patients SET name=?,phone=?,email=?,dob=?,notes=? WHERE id=? AND entity_id=?',(data.name.strip(),phone,email,data.dob,data.notes,patient_id,eid))
   audit(c,u,eid,'profile_updated','patient',patient_id)
  return {'id':patient_id,'updated':True}
@@ -828,8 +850,8 @@ def check_in(eid:int,data:CheckIn,u=Depends(current)):
   if data.existing_patient_id:
    must(c,'patients',eid,data.existing_patient_id);pid=data.existing_patient_id;reused=True
   else:
-   matches=matching_patient_records(c,eid,r['phone'],r['email'],exclude_registration_id=r['id'])
-   if matches and not data.duplicate_acknowledged:raise HTTPException(409,detail={'code':'POSSIBLE_DUPLICATE','matches':matches})
+   # Matching contacts were already reviewed at temporary registration or contact edit.
+   # Do not interrupt check-in with a second duplicate warning.
    uhid=nextnum(c,eid,'UHID');cur=c.execute('INSERT INTO patients(entity_id,uhid,name,phone,email,dob,notes,created_at) VALUES(?,?,?,?,?,?,?,?)',(eid,uhid,r['name'],r['phone'],r['email'],r['dob'],r['notes'],utc()));pid=cur.lastrowid;reused=False
   c.execute('UPDATE registrations SET patient_id=? WHERE id=? AND entity_id=?',(pid,r['id'],eid))
   audit(c,u,eid,'checked_in','patient',pid)
@@ -853,7 +875,7 @@ def resources(eid:int,u=Depends(current)):
 @app.get('/api/entities/{eid}/appointments')
 def appointments(eid:int,u=Depends(current)):
  access(eid,u)
- with db() as c:return rows(c,'''SELECT a.*,d.name doctor_name,r.name resource_name,COALESCE(p.name,t.name) patient_name FROM appointments a JOIN doctors d ON d.id=a.doctor_id LEFT JOIN resources r ON r.id=a.resource_id LEFT JOIN patients p ON p.id=a.patient_id LEFT JOIN registrations t ON t.id=a.registration_id WHERE a.entity_id=? ORDER BY a.start_time DESC LIMIT 200''',(eid,))
+ with db() as c:return rows(c,'''SELECT a.*,d.name doctor_name,r.name resource_name,COALESCE(p.name,t.name) patient_name,COALESCE(p.uhid,t.temp_id) patient_uhid,COALESCE(p.phone,t.phone) patient_phone,COALESCE(p.dob,t.dob) patient_dob,EXISTS(SELECT 1 FROM appointment_reschedules_v4 ar WHERE ar.entity_id=a.entity_id AND ar.appointment_id=a.id) was_rescheduled FROM appointments a JOIN doctors d ON d.id=a.doctor_id AND d.entity_id=a.entity_id LEFT JOIN resources r ON r.id=a.resource_id AND r.entity_id=a.entity_id LEFT JOIN patients p ON p.id=a.patient_id AND p.entity_id=a.entity_id LEFT JOIN registrations t ON t.id=a.registration_id AND t.entity_id=a.entity_id WHERE a.entity_id=? ORDER BY a.start_time DESC LIMIT 1000''',(eid,))
 @app.post('/api/entities/{eid}/appointments')
 def appointment(eid:int,data:AppointmentIn,u=Depends(current)):
  access(eid,u,('admin','reception','doctor'))
@@ -873,6 +895,7 @@ def appointment(eid:int,data:AppointmentIn,u=Depends(current)):
    start_min=local_start.hour*60+local_start.minute
    end_min=local_end.hour*60+local_end.minute
    matches=rows(c,'SELECT * FROM doctor_slots WHERE entity_id=? AND doctor_id=? AND weekday=? AND active=1 AND start_minute<=? AND end_minute>=?',(eid,data.doctor_id,local_start.weekday(),start_min,end_min))
+   matches.extend(rows(c,'SELECT * FROM doctor_monthly_slots WHERE entity_id=? AND doctor_id=? AND month_day=? AND active=1 AND start_minute<=? AND end_minute>=?',(eid,data.doctor_id,local_start.day,start_min,end_min)))
    if not any(start_min >= slot['start_minute'] and (start_min-slot['start_minute'])%slot['slot_minutes']==0 and (end_min-start_min)%slot['slot_minutes']==0 for slot in matches):
     fail('Appointment must align with an active doctor opening slot in Asia/Kolkata',409)
   # Shared clinician identity only links doctor accounts; patients and finances never link.
@@ -891,6 +914,49 @@ def appointment(eid:int,data:AppointmentIn,u=Depends(current)):
   if timeoff:fail('Doctor unavailable during requested time',409)
   cur=c.execute('INSERT INTO appointments(entity_id,patient_id,registration_id,doctor_id,resource_id,start_time,end_time,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?)',(eid,data.patient_id,data.registration_id,data.doctor_id,data.resource_id,st.astimezone(timezone.utc).isoformat(),en.astimezone(timezone.utc).isoformat(),data.reason,utc()));audit(c,u,eid,'created','appointment',cur.lastrowid)
  return {'id':cur.lastrowid}
+@app.post('/api/entities/{eid}/appointments/{aid}/reschedule')
+def reschedule_appointment(eid:int,aid:int,data:AppointmentRescheduleIn,u=Depends(current)):
+ access(eid,u,('admin','reception','doctor'))
+ if not data.reason.strip():fail('Reason for reschedule is required')
+ start=instant(data.start_time);end=instant(data.end_time)
+ if end<=start:fail('End time must be after start time')
+ st=datetime.fromisoformat(start).astimezone(ZoneInfo('Asia/Kolkata'))
+ en=datetime.fromisoformat(end).astimezone(ZoneInfo('Asia/Kolkata'))
+ if st.date()!=en.date():fail('Appointment must be within one day',409)
+ with db(True) as c:
+  previous=one(c,'SELECT * FROM appointments WHERE id=? AND entity_id=?',(aid,eid))
+  if not previous:fail('Appointment not found',404)
+  if previous['status'] in ('cancelled','completed'):fail('Completed or cancelled appointments cannot be rescheduled',409)
+  doctor=one(c,'SELECT * FROM doctors WHERE id=? AND entity_id=?',(data.doctor_id,eid))
+  if not doctor or not doctor['active']:fail('Doctor is not active in this entity',409)
+  if one(c,"SELECT id FROM appointments WHERE entity_id=? AND id<>? AND doctor_id=? AND status NOT IN ('cancelled','no_show') AND start_time<? AND end_time>?",(eid,aid,data.doctor_id,end,start)):
+   fail('Doctor already has an appointment during that time',409)
+  if previous['resource_id'] and one(c,"SELECT id FROM appointments WHERE entity_id=? AND id<>? AND resource_id=? AND status NOT IN ('cancelled','no_show') AND start_time<? AND end_time>?",(eid,aid,previous['resource_id'],end,start)):
+   fail('Chair or OT is not available during that time',409)
+  if one(c,'SELECT id FROM doctor_time_off WHERE entity_id=? AND doctor_id=? AND start_time<? AND end_time>?',(eid,data.doctor_id,end,start)):
+   fail('Doctor is blocked during the selected time',409)
+  link=one(c,'SELECT clinician_key FROM clinician_links WHERE entity_id=? AND doctor_id=?',(eid,data.doctor_id))
+  if link:
+   if one(c,"""SELECT a.id FROM appointments a JOIN clinician_links l ON l.entity_id=a.entity_id AND l.doctor_id=a.doctor_id WHERE l.clinician_key=? AND a.entity_id<>? AND a.status NOT IN ('cancelled','no_show') AND a.start_time<? AND a.end_time>?""",(link['clinician_key'],eid,end,start)):fail('Shared doctor already booked at another entity',409)
+   if one(c,"""SELECT t.id FROM doctor_time_off t JOIN clinician_links l ON l.entity_id=t.entity_id AND l.doctor_id=t.doctor_id WHERE l.clinician_key=? AND t.entity_id<>? AND t.start_time<? AND t.end_time>?""",(link['clinician_key'],eid,end,start)):fail('Shared doctor blocked at another entity',409)
+  rule=one(c,'SELECT enforce_slots FROM doctor_booking_rules WHERE entity_id=? AND doctor_id=?',(eid,data.doctor_id))
+  if rule and rule['enforce_slots']:
+   start_min=st.hour*60+st.minute;end_min=en.hour*60+en.minute
+   slots=rows(c,'SELECT start_minute,end_minute,slot_minutes FROM doctor_slots WHERE entity_id=? AND doctor_id=? AND weekday=? AND active=1',(eid,data.doctor_id,st.weekday()))
+   slots+=rows(c,'SELECT start_minute,end_minute,slot_minutes FROM doctor_monthly_slots WHERE entity_id=? AND doctor_id=? AND month_day=? AND active=1',(eid,data.doctor_id,st.day))
+   if not any(start_min>=sl['start_minute'] and end_min<=sl['end_minute'] and (start_min-sl['start_minute'])%sl['slot_minutes']==0 and (end_min-start_min)%sl['slot_minutes']==0 for sl in slots):
+    fail('Selected time is outside doctor opening slots',409)
+  c.execute('INSERT INTO appointment_reschedules_v4(entity_id,appointment_id,old_doctor_id,new_doctor_id,old_start_time,old_end_time,new_start_time,new_end_time,reason,changed_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(eid,aid,previous['doctor_id'],data.doctor_id,previous['start_time'],previous['end_time'],start,end,data.reason.strip(),u['id'],utc()))
+  c.execute("UPDATE appointments SET doctor_id=?,start_time=?,end_time=?,status='booked' WHERE entity_id=? AND id=?",(data.doctor_id,start,end,eid,aid))
+  audit(c,u,eid,'rescheduled','appointment',aid)
+ return {'ok':True,'appointment_id':aid}
+
+@app.get('/api/entities/{eid}/mis/appointment-reschedules')
+def appointment_reschedule_mis(eid:int,u=Depends(current)):
+ access(eid,u,('admin','reception'))
+ with db() as c:
+  return rows(c,"""SELECT r.*,a.patient_id,a.registration_id,COALESCE(p.name,t.name) patient_name,COALESCE(p.uhid,t.temp_id) uhid,od.name old_doctor,nd.name new_doctor,us.username changed_by_username FROM appointment_reschedules_v4 r JOIN appointments a ON a.id=r.appointment_id AND a.entity_id=r.entity_id JOIN doctors od ON od.id=r.old_doctor_id AND od.entity_id=r.entity_id JOIN doctors nd ON nd.id=r.new_doctor_id AND nd.entity_id=r.entity_id JOIN users us ON us.id=r.changed_by LEFT JOIN patients p ON p.id=a.patient_id AND p.entity_id=r.entity_id LEFT JOIN registrations t ON t.id=a.registration_id AND t.entity_id=r.entity_id WHERE r.entity_id=? ORDER BY r.created_at DESC""",(eid,))
+
 @app.get('/api/entities/{eid}/visits')
 def visits(eid:int,u=Depends(current)):
  access(eid,u)
@@ -1093,6 +1159,54 @@ def set_slot(eid:int,data:SlotIn,u=Depends(current)):
   cur=c.execute('INSERT INTO doctor_slots(entity_id,doctor_id,weekday,start_minute,end_minute,slot_minutes) VALUES(?,?,?,?,?,?)',(eid,data.doctor_id,data.weekday,a,b,data.slot_minutes))
   audit(c,u,eid,'created','doctor_slot',cur.lastrowid)
  return {'id':cur.lastrowid}
+
+@app.post('/api/entities/{eid}/doctor-slots/batch')
+def set_slot_batch(eid:int,data:BatchSlotsIn,u=Depends(current)):
+ access(eid,u,('admin',))
+ if data.recurrence not in ('daily','weekly','monthly'):fail('Choose Daily, Weekly or Monthly recurrence')
+ if data.recurrence=='daily':days=list(range(7))
+ elif data.recurrence=='weekly':
+  days=data.weekdays
+  if not days or len(set(days))!=len(days) or any(not 0<=d<=6 for d in days):fail('Select one or more valid weekdays')
+ else:
+  days=data.month_days
+  if not days or len(set(days))!=len(days) or any(not 1<=d<=31 for d in days):fail('Select one or more valid calendar dates')
+ windows=[]
+ for w in data.windows:
+  a,b=minutes(w.start_time),minutes(w.end_time)
+  if b<=a:fail('Each opening window must end after its start')
+  if (b-a)%w.slot_minutes:fail('Opening window length must be a multiple of appointment duration')
+  windows.append((a,b,w.slot_minutes))
+ ordered=sorted(windows)
+ if any(ordered[i][0]<ordered[i-1][1] for i in range(1,len(ordered))):fail('Opening windows must not overlap')
+ table='doctor_monthly_slots' if data.recurrence=='monthly' else 'doctor_slots'
+ day_col='month_day' if data.recurrence=='monthly' else 'weekday'
+ created=[]
+ with db(True) as c:
+  must(c,'doctors',eid,data.doctor_id)
+  for day in days:
+   for a,b,duration in ordered:
+    if one(c,f'SELECT id FROM {table} WHERE entity_id=? AND doctor_id=? AND {day_col}=? AND active=1 AND start_minute<? AND end_minute>?',(eid,data.doctor_id,day,b,a)):
+     fail('An opening slot already overlaps this day and time',409)
+    cur=c.execute(f'INSERT INTO {table}(entity_id,doctor_id,{day_col},start_minute,end_minute,slot_minutes) VALUES(?,?,?,?,?,?)',(eid,data.doctor_id,day,a,b,duration))
+    audit(c,u,eid,'created','doctor_slot_monthly' if data.recurrence=='monthly' else 'doctor_slot',cur.lastrowid)
+    created.append(cur.lastrowid)
+ return {'created':len(created),'ids':created,'recurrence':data.recurrence}
+
+@app.get('/api/entities/{eid}/doctor-slots/monthly')
+def get_monthly_slots(eid:int,u=Depends(current)):
+ access(eid,u)
+ with db() as c:
+  return rows(c,'SELECT s.*,d.name doctor_name FROM doctor_monthly_slots s JOIN doctors d ON d.id=s.doctor_id AND d.entity_id=s.entity_id WHERE s.entity_id=? AND s.active=1 ORDER BY doctor_id,month_day,start_minute',(eid,))
+
+@app.delete('/api/entities/{eid}/doctor-slots/monthly/{sid}')
+def disable_monthly_slot(eid:int,sid:int,u=Depends(current)):
+ access(eid,u,('admin',))
+ with db(True) as c:
+  cur=c.execute('UPDATE doctor_monthly_slots SET active=0 WHERE entity_id=? AND id=? AND active=1',(eid,sid))
+  if not cur.rowcount:fail('Slot not found',404)
+  audit(c,u,eid,'disabled','doctor_slot_monthly',sid)
+ return {'ok':True}
 
 @app.delete('/api/entities/{eid}/doctor-slots/{sid}')
 def delete_slot(eid:int,sid:int,u=Depends(current)):
@@ -1366,7 +1480,7 @@ def change_booking_rules(eid:int,doctor_id:int,payload:BookingRulesIn,u=Depends(
  access(eid,u,('admin',))
  with db(True) as c:
   must(c,'doctors',eid,doctor_id)
-  if payload.enforce_slots and not one(c,'SELECT id FROM doctor_slots WHERE entity_id=? AND doctor_id=? AND active=1',(eid,doctor_id)):
+  if payload.enforce_slots and not (one(c,'SELECT id FROM doctor_slots WHERE entity_id=? AND doctor_id=? AND active=1',(eid,doctor_id)) or one(c,'SELECT id FROM doctor_monthly_slots WHERE entity_id=? AND doctor_id=? AND active=1',(eid,doctor_id))):
    fail('Configure at least one recurring opening slot before enabling enforcement',409)
   c.execute('INSERT INTO doctor_booking_rules(entity_id,doctor_id,enforce_slots) VALUES(?,?,?) ON CONFLICT(entity_id,doctor_id) DO UPDATE SET enforce_slots=excluded.enforce_slots',(eid,doctor_id,int(payload.enforce_slots)))
   audit(c,u,eid,'booking_rules_updated','doctor',doctor_id)

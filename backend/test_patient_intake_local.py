@@ -29,10 +29,21 @@ with tempfile.TemporaryDirectory() as tmp:
   r=request('POST',f'/entities/{e}/registrations',{'name':'Another Sample','phone':'9000000001','duplicate_acknowledged':True},auth)
   assert r.status_code==200,r.text
   other=r.json()['id']
-  r=request('POST',f'/entities/{e}/check-in',{'registration_id':other},auth)
-  assert r.status_code==409,r.text
+  r=request('PUT',f'/entities/{e}/registrations/{other}',{'name':'Another Sample Corrected','phone':'9000000001'},auth)
+  assert r.status_code==200,r.text # Unchanged duplicate contact does not require re-verification.
+  r=request('PUT',f'/entities/{e}/registrations/{other}',{'name':'Another Sample Corrected','phone':'9000000001','email':'test@example.invalid'},auth)
+  assert r.status_code==409,r.text # Newly added email matches; verify again only when contact changes.
+  # Reusing an existing UHID at check-in should not trigger a second duplicate alert.
   r=request('POST',f'/entities/{e}/check-in',{'registration_id':other,'existing_patient_id':pid},auth)
   assert r.status_code==200 and r.json()['patient']['id']==pid,r.text
+  # Editing details without changing contact information must not trigger duplicate verification.
+  r=request('PUT',f'/entities/{e}/registrations/{temp}',{**patient,'name':'One more edit'},auth)
+  assert r.status_code==409,r.text # This registration is already checked in.
+  # A separate verified registration can receive a new UHID without a repeated duplicate prompt.
+  r=request('POST',f'/entities/{e}/registrations',{'name':'New Verified Person','phone':patient['phone'],'duplicate_acknowledged':True},auth)
+  assert r.status_code==200,r.text
+  r=request('POST',f'/entities/{e}/check-in',{'registration_id':r.json()['id']},auth)
+  assert r.status_code==200 and r.json()['patient']['id']!=pid,r.text
   r=request('PUT',f'/entities/{e}/patients/{pid}/profile',{**patient,'name':'Corrected Name'},auth)
   assert r.status_code==200,r.text
   stored=request('GET',f'/entities/{e}/patients',auth=auth).json()
