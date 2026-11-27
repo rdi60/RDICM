@@ -42,3 +42,8 @@ jobs:
           python test_v03_ui_finance.py
           python test_v04_admin_templates.py
           python test_patient_intake_local.py
+          python test_v07.py
+          python test_flexible_overlap_booking.py
+          python test_doctor_recurrence_local.py
+          python test_appointment_calendar_local.py
+          python test_patient_intake_local.py

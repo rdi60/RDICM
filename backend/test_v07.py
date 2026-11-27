@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory() as tmp:
   def book(ent,patient,doctor,begin,end,expected=200):
    return request('POST',f'/entities/{ent}/appointments',{'patient_id':patient,'doctor_id':doctor,'start_time':begin,'end_time':end},expected)
   book(eid,p,d,'2026-12-07T08:30:00+05:30','2026-12-07T09:00:00+05:30',409)
-  book(eid,p,d,'2026-12-07T09:15:00+05:30','2026-12-07T09:45:00+05:30',409)
+  book(eid,p,d,'2026-12-07T09:15:00+05:30','2026-12-07T12:15:00+05:30',409)
   book(eid,p,d,'2026-12-08T09:00:00+05:30','2026-12-08T09:30:00+05:30',409)
   # Link the two independent doctor profiles, not their patients.
   link=request('POST','/clinician-links',{'profiles':[{'entity_id':eid,'doctor_id':d},{'entity_id':tid,'doctor_id':dt}]},201)
