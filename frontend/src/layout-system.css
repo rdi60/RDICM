@@ -240,9 +240,10 @@
 .rd-calendar-doctor select{width:170px;max-width:100%}
 .rd-calendar-date-jump{display:flex;align-items:center;gap:6px;position:relative;min-width:190px;cursor:pointer;color:#a64b20}
 .rd-calendar-date-jump strong{font-size:13px;white-space:nowrap;min-width:0!important}
-.rd-calendar-date-jump input[type=date]{width:28px!important;max-width:28px;min-width:28px;height:32px;padding:0!important;opacity:.85;cursor:pointer;border:0!important;background:transparent!important;box-shadow:none!important;color:transparent!important;font-size:0!important}
+.rd-calendar-date-jump input[type=date]{position:absolute;inset:0;width:100%!important;max-width:none;min-width:0;height:100%;padding:0!important;opacity:0;cursor:pointer;border:0!important;background:transparent!important;box-shadow:none!important;color:transparent!important;font-size:0!important}
+.rd-calendar-date-jump:focus-within{outline:2px solid currentColor;outline-offset:3px;border-radius:4px}
 .rd-calendar-date-jump input[type=date]::-webkit-datetime-edit{display:none}
-.rd-calendar-date-jump input[type=date]::-webkit-calendar-picker-indicator{cursor:pointer;opacity:1;width:18px;margin:0}
+.rd-calendar-date-jump input[type=date]::-webkit-calendar-picker-indicator{position:absolute;inset:0;cursor:pointer;opacity:1;width:100%;height:100%;margin:0;padding:0}
 .rd-calendar-appointment-search{display:flex;gap:8px;align-items:center;padding:0 10px;min-width:230px;max-width:400px;flex:1;border:1px solid #efded3;border-radius:12px;box-shadow:var(--nm-soft);background:#fff9f5;color:#af4f1e}
 .rd-calendar-appointment-search input[type=search]{min-width:0;width:100%;min-height:36px!important;border:0!important;box-shadow:none!important;background:transparent!important;padding:6px 0!important;font-size:12px!important}
 .rd-appointment-rows{gap:5px;max-height:none;overflow:visible;padding:2px 3px 4px}
